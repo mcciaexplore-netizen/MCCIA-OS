@@ -5,6 +5,7 @@ import { Toaster } from 'sonner';
 import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/hooks/ThemeProvider';
 import { useTheme } from '@/hooks/useTheme';
+import { AuthProvider } from '@/auth/AuthProvider';
 import { queryClient } from './queryClient';
 
 /** Toaster that follows the active theme. */
@@ -18,7 +19,9 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>{children}</BrowserRouter>
+        <AuthProvider>
+          <BrowserRouter>{children}</BrowserRouter>
+        </AuthProvider>
         <ThemedToaster />
         {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>

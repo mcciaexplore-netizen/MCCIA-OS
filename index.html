@@ -16,17 +16,9 @@
       rel="stylesheet"
     />
     <title>MCCIA Intern OS</title>
-    <script>
-      // Prevent theme flash: apply persisted/system theme before first paint.
-      (function () {
-        try {
-          var stored = localStorage.getItem('mccia-theme');
-          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var dark = stored === 'dark' || (stored !== 'light' && prefersDark);
-          document.documentElement.classList.toggle('dark', dark);
-        } catch (e) {}
-      })();
-    </script>
+    <!-- Runs before first paint to avoid a theme flash. External (not inline)
+         so the CSP can stay strict — see vercel.json. -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

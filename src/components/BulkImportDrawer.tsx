@@ -16,7 +16,7 @@ import { FormField, TextArea, TextInput } from '@/components/form/fields';
 import { sheets } from '@/api/sheets';
 import { queryKeys } from '@/api/queryKeys';
 import { SHEET_NAMES } from '@/constants';
-import type { Company } from '@/types';
+import type { Company, ConsultingSession } from '@/types';
 import { useCompanies } from '@/hooks/useCompanies';
 import { errorMessage } from '@/hooks/mutationUtils';
 import { cn } from '@/utils/cn';
@@ -25,6 +25,7 @@ import {
   downloadImportTemplate,
   fetchGoogleSheetCsv,
   gridToConsultations,
+  materializeImport,
   parseDelimitedText,
   readWorkbookGrid,
   type ParsedImport,
@@ -128,34 +129,34 @@ export function BulkImportDrawer({ open, onClose }: BulkImportDrawerProps) {
   };
 
   const runImport = async () => {
-    if (!plan || !parsed || parsed.rows.length === 0) return;
+    if (!parsed || parsed.rows.length === 0) return;
     setImporting(true);
     try {
-      const keyToId = new Map(plan.existingByKey);
-      for (const company of plan.newCompanies) {
-        const created = await sheets.append<Company>(SHEET_NAMES.companies, company.input);
-        keyToId.set(company.key, created.id);
-      }
-      for (const patch of plan.companyPatches) {
-        await sheets.update(SHEET_NAMES.companies, patch.id, patch.fields);
-      }
-      for (const session of plan.sessions) {
-        const companyId = keyToId.get(session.key);
-        if (!companyId) continue;
-        await sheets.append(SHEET_NAMES.consultingSessions, { ...session.input, companyId });
-      }
+      // Recompute against the freshest data, then write both sheets atomically
+      // (all-or-nothing) so a failure mid-way never leaves a half-done import.
+      const [currentCompanies, currentSessions] = await Promise.all([
+        sheets.read<Company>(SHEET_NAMES.companies),
+        sheets.read<ConsultingSession>(SHEET_NAMES.consultingSessions),
+      ]);
+      const execPlan = buildImportPlan(parsed.rows, currentCompanies);
+      const { companies, sessions } = materializeImport(execPlan, currentCompanies, currentSessions);
+
+      await sheets.overwriteMany([
+        { sheet: SHEET_NAMES.companies, rows: companies },
+        { sheet: SHEET_NAMES.consultingSessions, rows: sessions },
+      ]);
       await qc.invalidateQueries({ queryKey: queryKeys.companies.all });
       await qc.invalidateQueries({ queryKey: queryKeys.consultingSessions.all });
 
-      const sessionCount = plan.sessions.length;
+      const n = execPlan.sessions.length;
       toast.success(
-        `Imported ${sessionCount} consultation${sessionCount === 1 ? '' : 's'} across ${
-          plan.companyCount
-        } compan${plan.companyCount === 1 ? 'y' : 'ies'}.`
+        `Imported ${n} consultation${n === 1 ? '' : 's'} across ${execPlan.companyCount} compan${
+          execPlan.companyCount === 1 ? 'y' : 'ies'
+        }.`
       );
       onClose();
     } catch (e) {
-      toast.error(errorMessage(e, 'Import failed — nothing further was written.'));
+      toast.error(errorMessage(e, 'Import failed — no changes were made.'));
     } finally {
       setImporting(false);
     }
@@ -315,7 +316,7 @@ export function BulkImportDrawer({ open, onClose }: BulkImportDrawerProps) {
  * ------------------------------------------------------------------ */
 
 function ImportPreview({ parsed, newCount }: { parsed: ParsedImport; newCount: number }) {
-  const { rows, mappedFields, unmappedHeaders, skippedRows } = parsed;
+  const { rows, mappedFields, unmappedHeaders, skippedRows, unparsedDates, invalidEmails } = parsed;
 
   if (rows.length === 0 && mappedFields.length === 0) return null;
 
@@ -335,6 +336,18 @@ function ImportPreview({ parsed, newCount }: { parsed: ParsedImport; newCount: n
       {skippedRows > 0 && (
         <p className="text-xs text-amber-600 dark:text-amber-400">
           {skippedRows} row{skippedRows === 1 ? '' : 's'} skipped (no company name).
+        </p>
+      )}
+
+      {unparsedDates > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {unparsedDates} date{unparsedDates === 1 ? '' : 's'} couldn’t be read and will be left blank.
+        </p>
+      )}
+
+      {invalidEmails > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {invalidEmails} row{invalidEmails === 1 ? '' : 's'} have an unrecognised email format (kept as-is).
         </p>
       )}
 

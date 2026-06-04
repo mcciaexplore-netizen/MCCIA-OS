@@ -1,9 +1,10 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Settings, Sparkles } from 'lucide-react';
+import { LogOut, Search, Settings, Sparkles } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NotificationBell } from './NotificationBell';
 import { NAV_ITEMS } from '@/components/navigation';
 import { useAppCommand } from '@/components/command/useAppCommand';
+import { useAuth } from '@/auth/useAuth';
 import { APP_NAME, ROUTES } from '@/constants';
 
 /** Resolve the page title from the current route for the desktop header. */
@@ -24,6 +25,7 @@ function useCurrentTitle(): string {
 export function TopBar() {
   const title = useCurrentTitle();
   const { openPalette } = useAppCommand();
+  const { user, signOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/80 sm:px-6">
@@ -74,6 +76,30 @@ export function TopBar() {
         </Link>
 
         <ThemeToggle />
+
+        {user && (
+          <div className="ml-1 flex items-center gap-2 border-l border-slate-200 pl-2 dark:border-slate-700">
+            <span
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-lg dark:bg-slate-800"
+              title={`${user.name} · ${user.role}`}
+              aria-hidden
+            >
+              {user.emoji}
+            </span>
+            <span className="hidden text-sm font-medium text-slate-700 dark:text-slate-200 sm:block">
+              {user.name}
+            </span>
+            <button
+              type="button"
+              onClick={signOut}
+              aria-label={`Sign out ${user.name}`}
+              title="Sign out"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50"
+            >
+              <LogOut className="h-5 w-5" aria-hidden />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

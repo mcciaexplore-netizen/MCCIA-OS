@@ -21,14 +21,34 @@ function storageKey(sheet: SheetName): string {
   return `${STORAGE_PREFIX}${sheet}`;
 }
 
+/**
+ * Preserve an unreadable blob under a separate key so it is NEVER silently
+ * overwritten by the next save — it can be inspected/recovered from devtools.
+ */
+function backupCorrupt(key: string, raw: string): void {
+  try {
+    const backupKey = `${key}:corrupt:${Date.now()}`;
+    if (!window.localStorage.getItem(backupKey)) {
+      window.localStorage.setItem(backupKey, raw);
+    }
+  } catch {
+    /* best effort: if even the backup can't be written, fall through */
+  }
+}
+
 function loadAll<T>(sheet: SheetName): T[] {
   if (typeof window === 'undefined') return [];
-  const raw = window.localStorage.getItem(storageKey(sheet));
+  const key = storageKey(sheet);
+  const raw = window.localStorage.getItem(key);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
+    if (Array.isArray(parsed)) return parsed as T[];
+    // Valid JSON but wrong shape — treat as corruption, don't trust it.
+    backupCorrupt(key, raw);
+    return [];
   } catch {
+    backupCorrupt(key, raw);
     return [];
   }
 }
@@ -93,6 +113,28 @@ export class LocalDataStore {
       rows.filter((r) => r.id !== id)
     );
     return { id };
+  }
+
+  /**
+   * Atomically replace the full contents of one or more sheets. Snapshots the
+   * current values first and rolls every key back if any write fails (e.g. the
+   * storage quota is exceeded), so a bulk import is all-or-nothing — it never
+   * leaves a half-written batch behind.
+   */
+  async overwriteMany(updates: { sheet: SheetName; rows: unknown[] }[]): Promise<void> {
+    const snapshots = updates.map(({ sheet }) => {
+      const key = storageKey(sheet);
+      return { key, previous: window.localStorage.getItem(key) };
+    });
+    try {
+      for (const { sheet, rows } of updates) saveAll(sheet, rows);
+    } catch (error) {
+      for (const { key, previous } of snapshots) {
+        if (previous === null) window.localStorage.removeItem(key);
+        else window.localStorage.setItem(key, previous);
+      }
+      throw error;
+    }
   }
 }
 

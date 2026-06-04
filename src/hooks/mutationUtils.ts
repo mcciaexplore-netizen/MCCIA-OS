@@ -1,11 +1,9 @@
 import type { QueryClient, UseMutationOptions } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { NotConfiguredError } from '@/api/errors';
 import type { BaseRecord } from '@/types';
 
 /** Friendly message for a mutation/query error, used by toasts. */
 export function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof NotConfiguredError) return 'Connect your Google Sheet first (see .env.example).';
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }

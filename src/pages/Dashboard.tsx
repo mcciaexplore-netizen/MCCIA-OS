@@ -33,10 +33,11 @@ import type { AppProject, Company, ConsultingSession, FollowUp, SocialCreative }
 import { formatDate, formatLongDate, formatRelative } from '@/utils/date';
 import { getDaysUntil, getFollowUpStatus, urgencyRank, type FollowUpUrgency } from '@/utils/followup';
 import { STAGE_ACCENT } from '@/utils/projectStage';
+import { useAuth } from '@/auth/useAuth';
 import { cn } from '@/utils/cn';
 
-/** The intern this workspace belongs to (drives the greeting). */
-const USER_NAME = 'Sujal';
+/** Fallback greeting name when no profile is resolved. */
+const USER_NAME = 'there';
 
 function timeAwareGreeting(hour: number): string {
   if (hour < 12) return 'Good morning';
@@ -74,6 +75,7 @@ export function Dashboard() {
   const followUpsQuery = useFollowUps();
   const updateFollowUp = useUpdateFollowUp();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const queries = [companiesQuery, sessionsQuery, projectsQuery, creativesQuery, followUpsQuery];
   const isPending = queries.some((q) => q.isPending);
@@ -210,7 +212,7 @@ export function Dashboard() {
       {/* Section 1 — Today's briefing */}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-          {greeting}, {USER_NAME}
+          {greeting}, {user?.name ?? USER_NAME}
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{formatLongDate()}</p>
         {!isPending && !firstError && (

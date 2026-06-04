@@ -34,6 +34,7 @@ import { ROUTES } from '@/constants';
 import type { AppProject, Company, ConsultingSession, SocialCreative } from '@/types';
 import { formatDate, formatDateTime, formatRelative } from '@/utils/date';
 import { buildTimeline, type TimelineKind } from '@/utils/timeline';
+import { sanitizeUrl } from '@/utils/url';
 
 type TabKey = 'consulting' | 'projects' | 'social';
 
@@ -193,9 +194,11 @@ function ContactLink({
   external?: boolean;
   children: ReactNode;
 }) {
+  const safe = sanitizeUrl(href);
+  if (!safe) return null;
   return (
     <a
-      href={href}
+      href={safe}
       target={external ? '_blank' : undefined}
       rel={external ? 'noreferrer' : undefined}
       className="inline-flex items-center gap-1.5 transition-colors hover:text-brand-600 dark:hover:text-brand-300"
@@ -243,9 +246,11 @@ function RowCard({ children }: { children: ReactNode }) {
 }
 
 function ExternalChip({ href, label }: { href: string; label: string }) {
+  const safe = sanitizeUrl(href);
+  if (!safe) return null;
   return (
     <a
-      href={href}
+      href={safe}
       target="_blank"
       rel="noreferrer"
       className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-600 dark:border-slate-700 dark:text-slate-300 dark:hover:text-brand-300"

@@ -20,7 +20,9 @@ A personal workspace for an AI intern at MCCIA to manage **consulting engagement
 - **Command palette** (`⌘K` / `Ctrl+K` or `/`) — search across companies, sessions, and projects and jump to any result.
 - **Keyboard shortcuts** — `N` = new entry (context-aware per page), `/` = search, `D` = dashboard.
 - **Notification bell** — count of overdue items, with a dropdown to jump to each.
-- **Settings** — preferences (default follow-up interval, theme, timezone) and data management (export all data as JSON, clear cache).
+- **Profile login** — a password-gated profile picker guards the workspace (client-side gate — see the Security note under *Data & storage*).
+- **Bulk Excel import / export** — import consultations from an Excel/CSV file, pasted cells, or a public Google Sheets link; export everything back to `.xlsx`.
+- **Settings** — preferences (default follow-up interval, theme, timezone) and data management (Excel import/export, export all data as JSON, clear cache).
 - **Resilient UX** — optimistic updates with rollback, per-route error boundaries, loading skeletons, and empty/error states everywhere.
 - Fully responsive (sidebar on desktop, bottom tab bar on mobile) with light / dark / system themes and no flash on first paint.
 
@@ -43,6 +45,11 @@ projects, and creatives in the app and they're saved immediately.
 | `npm run preview` | Preview the production build locally |
 | `npm run typecheck` | Run `tsc --noEmit` |
 | `npm run lint` | Lint with ESLint (`--max-warnings 0`) |
+| `npm test` | Run the Vitest unit suite |
+| `npm run test:watch` | Run Vitest in watch mode |
+
+> Set or change a login password with `npx tsx scripts/hash-password.ts "new-password"`
+> and paste the printed hash into [`src/auth/users.ts`](src/auth/users.ts).
 
 ## Data & storage
 
@@ -58,9 +65,17 @@ forms — is storage-agnostic.
   across machines. Use **Settings → Export all data** to download a JSON backup.
 - **Capacity:** `localStorage` holds a few MB — plenty for text records. The only
   realistic way to fill it is attaching many large base64 images to creatives.
+- **Resilience:** if a stored blob is ever unreadable it's copied aside under a
+  `…:corrupt:<ts>` key rather than silently overwritten, and bulk imports are
+  written atomically (all-or-nothing).
 
-> A server-side Google Sheets proxy still exists in the repo (`api/`, `server/`)
-> from an earlier iteration but is **not used** — the app is fully client-side.
+> **Security note:** the profile login is a *client-side gate*, not real
+> authentication — password hashes ship in the bundle and the data is readable
+> from devtools. It keeps casual users out; it is not a cryptographic boundary.
+>
+> A **Neon (Postgres) backend** is planned to replace browser storage for
+> durable, multi-device data and server-side auth. The storage layer is isolated
+> behind [`src/api/sheets.ts`](src/api/sheets.ts) so that swap stays localized.
 
 ## Deployment
 
@@ -81,22 +96,20 @@ routing.
 ```
 vercel.json     Build + SPA-routing config for Vercel
 src/
-  api/          Local data store (localStorage), errors, query keys
+  api/          Local data store (localStorage) + query keys
   app/          App-level providers (React Query client, Providers)
+  auth/         Profile login: context/provider/hook, roster, password hashing
   components/
     command/    Command palette, global shortcuts, new-action registry
     layout/     App shell (Sidebar, TopBar, MobileNav, ...)
     ui/         Primitives (Button, Card, Badge, Skeleton, SlideOver, ...)
-  pages/        Dashboard, Consulting, AppDev, Social, Companies, Settings, ...
+  pages/        Dashboard, Consulting, AppDev, Social, Companies, Settings, Login
   hooks/        Theme provider + data hooks (+ optimistic mutation helpers)
   schemas/      Zod form schemas + mappers
   types/        Domain interfaces + enum unions + CompanyWithStats
-  utils/        Date/format helpers, preferences, status & stage tones
+  utils/        Date/format/url helpers, consultation import-export, preferences
   constants/    Sheet schema metadata, labels/options, routes, query config
 ```
-
-> `api/` and `server/` hold an unused Google Sheets proxy from an earlier
-> iteration; they're not part of the running app.
 
 ## Notes
 

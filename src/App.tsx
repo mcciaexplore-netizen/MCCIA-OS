@@ -1,6 +1,9 @@
 import { lazy } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { Login } from '@/pages/Login';
+import { useAuth } from '@/auth/useAuth';
+import { useStorageSync } from '@/hooks/useStorageSync';
 import { ROUTES } from '@/constants';
 
 /**
@@ -23,6 +26,12 @@ const NotFoundPage = lazy(() =>
 
 /** Route table. Every module page nests inside the persistent app shell. */
 export default function App() {
+  const { user } = useAuth();
+  useStorageSync();
+
+  // Gate the whole app behind the profile-picker login.
+  if (!user) return <Login />;
+
   return (
     <Routes>
       <Route element={<AppLayout />}>

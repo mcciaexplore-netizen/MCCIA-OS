@@ -1,5 +1,4 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { NotConfiguredError } from '@/api/errors';
 import { Button } from './Button';
 
 interface ErrorStateProps {
@@ -10,13 +9,6 @@ interface ErrorStateProps {
 }
 
 function messageFor(error: unknown): { title: string; description: string } {
-  if (error instanceof NotConfiguredError) {
-    return {
-      title: 'Backend not connected',
-      description:
-        'Add your Google Sheets credentials to a .env.local file (see .env.example) to start loading data.',
-    };
-  }
   if (error instanceof Error) {
     return { title: 'Something went wrong', description: error.message };
   }

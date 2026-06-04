@@ -153,7 +153,13 @@ export interface ParsedImport {
   unmappedHeaders: string[];
   /** Rows skipped because they had no company name. */
   skippedRows: number;
+  /** Rows whose non-empty date cell could not be parsed (kept, date left blank). */
+  unparsedDates: number;
+  /** Rows whose non-empty email looks malformed (kept as-is). */
+  invalidEmails: number;
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Map a header row to `{ columnIndex → field }`, plus the leftovers. */
 function mapHeaderRow(headers: string[]): {
@@ -183,13 +189,22 @@ function mapHeaderRow(headers: string[]): {
 /** Turn a raw grid (row 0 = headers) into typed consultation rows. */
 export function gridToConsultations(grid: string[][]): ParsedImport {
   if (grid.length === 0) {
-    return { rows: [], mappedFields: [], unmappedHeaders: [], skippedRows: 0 };
+    return {
+      rows: [],
+      mappedFields: [],
+      unmappedHeaders: [],
+      skippedRows: 0,
+      unparsedDates: 0,
+      invalidEmails: 0,
+    };
   }
   const [headerRow, ...dataRows] = grid;
   const { indexToField, mappedFields, unmappedHeaders } = mapHeaderRow(headerRow);
 
   const rows: ConsultationRow[] = [];
   let skippedRows = 0;
+  let unparsedDates = 0;
+  let invalidEmails = 0;
 
   for (const cells of dataRows) {
     const row: ConsultationRow = { ...EMPTY_ROW };
@@ -201,10 +216,12 @@ export function gridToConsultations(grid: string[][]): ParsedImport {
       if (cells.some((c) => (c ?? '').toString().trim() !== '')) skippedRows += 1;
       continue;
     }
+    if (row.date !== '' && parseImportDate(row.date) === null) unparsedDates += 1;
+    if (row.email !== '' && !EMAIL_RE.test(row.email)) invalidEmails += 1;
     rows.push(row);
   }
 
-  return { rows, mappedFields, unmappedHeaders, skippedRows };
+  return { rows, mappedFields, unmappedHeaders, skippedRows, unparsedDates, invalidEmails };
 }
 
 /* ------------------------------------------------------------------ *
@@ -306,7 +323,15 @@ export async function fetchGoogleSheetCsv(url: string): Promise<string> {
       `The sheet responded ${res.status}. Turn on link-sharing (“Anyone with the link can view”), or use Paste / file upload.`
     );
   }
-  return res.text();
+  const text = await res.text();
+  // A private sheet often returns 200 with an HTML sign-in page rather than CSV.
+  const contentType = res.headers.get('content-type') ?? '';
+  if (contentType.includes('text/html') || /^\s*<(?:!doctype|html)/i.test(text)) {
+    throw new Error(
+      'That sheet isn’t publicly viewable. Set sharing to “Anyone with the link can view”, or use Paste / file upload.'
+    );
+  }
+  return text;
 }
 
 /* ------------------------------------------------------------------ *
@@ -488,8 +513,56 @@ export function buildImportPlan(rows: ConsultationRow[], existing: Company[]): I
     companyPatches,
     sessions,
     existingByKey,
-    companyCount: newKeys.size + new Set(companyPatches.map((p) => p.id)).size,
+    // Every distinct company that gets at least one session — new, patched, or
+    // an existing record that needed no enrichment.
+    companyCount: new Set(sessions.map((s) => s.key)).size,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Materialisation (pure) — turn a plan into the final sheet arrays
+ * ------------------------------------------------------------------ */
+
+function genId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * Apply a plan to the current sheet contents and return the FULL next arrays for
+ * `Companies` and `ConsultingSessions`. Pure (aside from id/clock generation) so
+ * the caller can write both in a single atomic `overwriteMany` — no partial
+ * batches, no per-row re-serialisation.
+ */
+export function materializeImport(
+  plan: ImportPlan,
+  currentCompanies: Company[],
+  currentSessions: ConsultingSession[]
+): { companies: Company[]; sessions: ConsultingSession[] } {
+  const now = new Date().toISOString();
+  const companies = currentCompanies.slice();
+  const indexById = new Map(companies.map((c, i) => [c.id, i]));
+  const keyToId = new Map(plan.existingByKey);
+
+  for (const { key, input } of plan.newCompanies) {
+    const id = genId();
+    companies.push({ ...input, id, createdAt: now, updatedAt: now });
+    keyToId.set(key, id);
+  }
+
+  for (const { id, fields } of plan.companyPatches) {
+    const idx = indexById.get(id);
+    if (idx != null) companies[idx] = { ...companies[idx], ...fields, updatedAt: now };
+  }
+
+  const sessions = currentSessions.slice();
+  for (const { key, input } of plan.sessions) {
+    const companyId = keyToId.get(key);
+    if (!companyId) continue;
+    sessions.push({ ...input, companyId, id: genId(), createdAt: now, updatedAt: now });
+  }
+
+  return { companies, sessions };
 }
 
 /* ------------------------------------------------------------------ *
@@ -527,10 +600,14 @@ function toExportRecord(company: Company, session: ConsultingSession | null): Re
 }
 
 /**
- * Download every consultation as an .xlsx workbook. One row per session, joined
- * to its company; companies with no sessions still get a row so nothing is lost.
+ * Build (but don't download) the consultations workbook. One row per session,
+ * joined to its company; companies with no sessions still get a row so nothing
+ * is lost. Pure — kept separate from the file write so it can be unit-tested.
  */
-export function exportConsultationsToXlsx(companies: Company[], sessions: ConsultingSession[]): void {
+export function buildConsultationsWorkbook(
+  companies: Company[],
+  sessions: ConsultingSession[]
+): XLSX.WorkBook {
   const byId = new Map(companies.map((c) => [c.id, c]));
   const records: Record<string, string>[] = [];
 
@@ -554,7 +631,12 @@ export function exportConsultationsToXlsx(companies: Company[], sessions: Consul
       : XLSX.utils.aoa_to_sheet([headers]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Consultations');
-  XLSX.writeFile(wb, `mccia-consultations-${todayStamp()}.xlsx`);
+  return wb;
+}
+
+/** Download every consultation as an .xlsx workbook. */
+export function exportConsultationsToXlsx(companies: Company[], sessions: ConsultingSession[]): void {
+  XLSX.writeFile(buildConsultationsWorkbook(companies, sessions), `mccia-consultations-${todayStamp()}.xlsx`);
 }
 
 /** Download a headers-only .xlsx the user can fill in and re-import. */
