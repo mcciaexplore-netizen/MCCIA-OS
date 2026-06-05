@@ -8,6 +8,8 @@ export interface AuthContextValue {
   signIn: (user: SessionUser) => void;
   /** Lock the app and return to the login screen. */
   signOut: () => void;
+  /** Re-read the signed-in profile from storage (after a name/emoji change). */
+  reloadUser: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);

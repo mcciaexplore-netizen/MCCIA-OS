@@ -5,21 +5,26 @@ import {
   Database,
   Download,
   FileSpreadsheet,
+  KeyRound,
   Monitor,
   Moon,
   Sun,
   Trash2,
   Upload,
+  UserCog,
   type LucideIcon,
 } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { FormField, SelectInput } from '@/components/form/fields';
+import { FormField, SelectInput, TextInput } from '@/components/form/fields';
 import { sheets } from '@/api/sheets';
 import { SHEET_NAMES, type ThemePreference } from '@/constants';
 import type { Company, ConsultingSession } from '@/types';
 import { useTheme } from '@/hooks/useTheme';
+import { useAuth } from '@/auth/useAuth';
+import { effectiveUserById, setPasswordHash, setProfile, setRecoveryHash } from '@/auth/account';
+import { sha256Hex, verifyPassword } from '@/auth/hash';
 import { errorMessage } from '@/hooks/mutationUtils';
 
 // SheetJS-heavy drawer: loaded on demand so it stays out of the Settings chunk.
@@ -53,10 +58,139 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <PageHeader title="Settings" description="Personalise your workspace and manage your data." />
+      <AccountCard />
       <PreferencesCard />
       <ImportExportCard />
       <DataCard />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Account — name/emoji, password, recovery code
+ * ------------------------------------------------------------------ */
+
+function AccountCard() {
+  const { user, reloadUser } = useAuth();
+
+  const [name, setName] = useState(user?.name ?? '');
+  const [emoji, setEmoji] = useState(user?.emoji ?? '');
+
+  const [curPw, setCurPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+
+  const [recPw, setRecPw] = useState('');
+  const [newRec, setNewRec] = useState('');
+
+  if (!user) return null;
+  const userId = user.id;
+
+  const saveProfile = () => {
+    if (!name.trim()) {
+      toast.error('Name cannot be empty.');
+      return;
+    }
+    setProfile(userId, { name: name.trim(), emoji: emoji.trim() || user.emoji });
+    reloadUser();
+    toast.success('Profile updated');
+  };
+
+  const verifyCurrent = async (entered: string): Promise<boolean> => {
+    const eff = effectiveUserById(userId);
+    return !!eff && verifyPassword(eff, entered);
+  };
+
+  const changePassword = async () => {
+    if (!(await verifyCurrent(curPw))) return toast.error('Current password is incorrect.');
+    if (newPw.length < 4) return toast.error('New password must be at least 4 characters.');
+    if (newPw !== confirmPw) return toast.error('New passwords do not match.');
+    setPasswordHash(userId, await sha256Hex(newPw));
+    setCurPw('');
+    setNewPw('');
+    setConfirmPw('');
+    toast.success('Password changed');
+  };
+
+  const changeRecovery = async () => {
+    if (!(await verifyCurrent(recPw))) return toast.error('Current password is incorrect.');
+    if (newRec.length < 4) return toast.error('Recovery code must be at least 4 characters.');
+    setRecoveryHash(userId, await sha256Hex(newRec));
+    setRecPw('');
+    setNewRec('');
+    toast.success('Recovery code updated');
+  };
+
+  return (
+    <SectionCard
+      icon={UserCog}
+      title="Account"
+      description="Your sign-in profile, password, and recovery code (used by “Forgot password”)."
+    >
+      {/* Profile */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[5rem,1fr,auto] sm:items-end">
+        <FormField label="Avatar" htmlFor="acc-emoji">
+          <TextInput
+            id="acc-emoji"
+            value={emoji}
+            maxLength={4}
+            onChange={(e) => setEmoji(e.target.value)}
+            className="text-center text-xl"
+          />
+        </FormField>
+        <FormField label="Display name" htmlFor="acc-name">
+          <TextInput id="acc-name" value={name} onChange={(e) => setName(e.target.value)} />
+        </FormField>
+        <Button variant="secondary" onClick={saveProfile}>
+          Save profile
+        </Button>
+      </div>
+
+      <hr className="my-4 border-slate-100 dark:border-slate-800" />
+
+      {/* Change password */}
+      <p className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
+        <KeyRound className="h-4 w-4 text-slate-400" aria-hidden />
+        Change password
+      </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <FormField label="Current password" htmlFor="acc-cur">
+          <TextInput id="acc-cur" type="password" autoComplete="current-password" value={curPw} onChange={(e) => setCurPw(e.target.value)} />
+        </FormField>
+        <FormField label="New password" htmlFor="acc-new">
+          <TextInput id="acc-new" type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+        </FormField>
+        <FormField label="Confirm new" htmlFor="acc-confirm">
+          <TextInput id="acc-confirm" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} />
+        </FormField>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Button variant="secondary" onClick={changePassword} disabled={!curPw || !newPw || !confirmPw}>
+          Update password
+        </Button>
+      </div>
+
+      <hr className="my-4 border-slate-100 dark:border-slate-800" />
+
+      {/* Change recovery code */}
+      <p className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">Recovery code</p>
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+        Used to reset your password from the login screen if you forget it. Keep it somewhere safe.
+      </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FormField label="Current password" htmlFor="acc-recpw">
+          <TextInput id="acc-recpw" type="password" autoComplete="current-password" value={recPw} onChange={(e) => setRecPw(e.target.value)} />
+        </FormField>
+        <FormField label="New recovery code" htmlFor="acc-newrec">
+          <TextInput id="acc-newrec" value={newRec} onChange={(e) => setNewRec(e.target.value)} />
+        </FormField>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Button variant="secondary" onClick={changeRecovery} disabled={!recPw || !newRec}>
+          Update recovery code
+        </Button>
+      </div>
+    </SectionCard>
   );
 }
 

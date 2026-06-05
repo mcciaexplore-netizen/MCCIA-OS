@@ -20,3 +20,10 @@ export async function verifyPassword(user: AppUser, password: string): Promise<b
   const hash = await sha256Hex(password);
   return hash === user.passwordHash;
 }
+
+/** True when `code` matches the profile's stored recovery-code hash. */
+export async function verifyRecovery(user: AppUser, code: string): Promise<boolean> {
+  if (!code) return false;
+  const hash = await sha256Hex(code);
+  return hash === user.recoveryHash;
+}

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { LayoutGrid, List, Plus, Rocket, Search } from 'lucide-react';
+import { Download, LayoutGrid, List, Plus, Rocket, Search, Upload } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -17,8 +17,14 @@ import { queryKeys } from '@/api/queryKeys';
 import { useAppProjects, useUpdateAppProject } from '@/hooks/useAppProjects';
 import { useCompanies } from '@/hooks/useCompanies';
 import { SHEET_NAMES } from '@/constants';
-import type { AppProject, ProjectStage } from '@/types';
+import type { AppProject, Company, ProjectStage } from '@/types';
 import { cn } from '@/utils/cn';
+import { errorMessage } from '@/hooks/mutationUtils';
+
+// SheetJS-heavy drawer: load only when the user first opens Import.
+const ProjectImportDrawer = lazy(() =>
+  import('@/components/ProjectImportDrawer').then((m) => ({ default: m.ProjectImportDrawer }))
+);
 
 type ViewMode = 'board' | 'list';
 
@@ -36,6 +42,33 @@ export function AppDev() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerProject, setDrawerProject] = useState<AppProject | undefined>(undefined);
   const [drawerStage, setDrawerStage] = useState<ProjectStage | undefined>(undefined);
+
+  // Import / export.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importLoaded, setImportLoaded] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const openImport = () => {
+    setImportLoaded(true);
+    setImportOpen(true);
+  };
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const [{ exportProjectsToXlsx }, allCompanies, allProjects] = await Promise.all([
+        import('@/utils/projectIO'),
+        sheets.read<Company>(SHEET_NAMES.companies),
+        sheets.read<AppProject>(SHEET_NAMES.appProjects),
+      ]);
+      exportProjectsToXlsx(allCompanies, allProjects);
+      toast.success('Excel workbook downloaded');
+    } catch (e) {
+      toast.error(errorMessage(e, 'Could not export to Excel'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const isPending = projectsQuery.isPending || companiesQuery.isPending;
   const queries = [projectsQuery, companiesQuery];
@@ -101,10 +134,20 @@ export function AppDev() {
         title="App Development Pipeline"
         description="Track every client app from discovery to delivery."
         actions={
-          <Button size="sm" onClick={() => openAdd()}>
-            <Plus className="h-4 w-4" />
-            Add project
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={openImport}>
+              <Upload className="h-4 w-4" />
+              Import
+            </Button>
+            <Button size="sm" variant="secondary" onClick={exportExcel} loading={exporting}>
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
+            <Button size="sm" onClick={() => openAdd()}>
+              <Plus className="h-4 w-4" />
+              Add project
+            </Button>
+          </div>
         }
       />
 
@@ -194,6 +237,11 @@ export function AppDev() {
         project={drawerProject}
         defaultStage={drawerStage}
       />
+      {importLoaded && (
+        <Suspense fallback={null}>
+          <ProjectImportDrawer open={importOpen} onClose={() => setImportOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }
