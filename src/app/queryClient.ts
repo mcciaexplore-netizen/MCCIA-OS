@@ -7,7 +7,8 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: QUERY_CONFIG.staleTime,
       gcTime: QUERY_CONFIG.gcTime,
-      refetchOnWindowFocus: false,
+      // Data is shared in Neon, so refresh on focus to pick up others' edits.
+      refetchOnWindowFocus: true,
       retry: (failureCount) => failureCount < QUERY_CONFIG.retry,
     },
     mutations: {

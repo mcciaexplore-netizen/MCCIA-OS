@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Path the browser POSTs Sheets proxy requests to. Defaults to /api/sheets. */
-  readonly VITE_SHEETS_API_PATH?: string;
+  /** Shared key sent to the data API as `x-app-key` (basic gate, ships in the bundle). */
+  readonly VITE_APP_API_KEY?: string;
 }
 
 interface ImportMeta {

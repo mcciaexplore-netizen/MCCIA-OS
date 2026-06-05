@@ -1,134 +1,113 @@
-// @vitest-environment jsdom
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { LocalDataStore } from './sheets';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { RemoteDataStore } from './sheets';
 import { SHEET_NAMES } from '@/constants';
 
 const COMPANIES = SHEET_NAMES.companies;
 const SESSIONS = SHEET_NAMES.consultingSessions;
-const keyOf = (sheet: string) => `mccia:data:${sheet}`;
 
-// Minimal in-memory Storage (jsdom + Node 25's experimental localStorage clash;
-// a hand-rolled mock keeps the store tests deterministic and dependency-free).
-class MemoryStorage {
-  private m = new Map<string, string>();
-  get length() {
-    return this.m.size;
-  }
-  clear() {
-    this.m.clear();
-  }
-  getItem(k: string) {
-    return this.m.has(k) ? this.m.get(k)! : null;
-  }
-  setItem(k: string, v: string) {
-    this.m.set(k, String(v));
-  }
-  removeItem(k: string) {
-    this.m.delete(k);
-  }
-  key(i: number) {
-    return Array.from(this.m.keys())[i] ?? null;
-  }
+/** A `fetch` stub that records calls and returns a canned JSON response. */
+function mockFetch(body: unknown, init?: { status?: number }) {
+  const fn = vi.fn<typeof fetch>(async () =>
+    new Response(JSON.stringify(body), {
+      status: init?.status ?? 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  );
+  vi.stubGlobal('fetch', fn);
+  return fn;
 }
 
-function installStorage(): MemoryStorage {
-  const mock = new MemoryStorage();
-  Object.defineProperty(window, 'localStorage', { value: mock, configurable: true, writable: true });
-  return mock;
-}
-
-function keysWithPrefix(prefix: string): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i += 1) {
-    const k = window.localStorage.key(i);
-    if (k && k.startsWith(prefix)) out.push(k);
-  }
-  return out;
-}
-
-let store: LocalDataStore;
+let store: RemoteDataStore;
 
 beforeEach(() => {
-  installStorage();
-  store = new LocalDataStore();
+  store = new RemoteDataStore();
 });
 
-describe('CRUD', () => {
-  it('append generates id + timestamps and read returns the row', async () => {
-    const rec = await store.append<{ id: string; createdAt: string }>(COMPANIES, { name: 'Acme' });
-    expect(rec.id).toBeTruthy();
-    expect(rec.createdAt).toBeTruthy();
-    const all = await store.read<{ name: string }>(COMPANIES);
-    expect(all).toHaveLength(1);
-    expect(all[0].name).toBe('Acme');
-  });
-
-  it('update merges fields and preserves the rest', async () => {
-    const rec = await store.append<{ id: string }>(COMPANIES, { name: 'A', status: 'active' });
-    const updated = await store.update<{ name: string; status: string }>(COMPANIES, rec.id, { name: 'B' });
-    expect(updated.name).toBe('B');
-    expect(updated.status).toBe('active');
-  });
-
-  it('remove deletes the row', async () => {
-    const rec = await store.append<{ id: string }>(COMPANIES, { name: 'A' });
-    await store.remove(COMPANIES, rec.id);
-    expect(await store.read(COMPANIES)).toHaveLength(0);
-  });
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
-describe('corruption guard', () => {
-  it('backs up an unreadable blob instead of silently dropping it, and never overwrites the backup', async () => {
-    window.localStorage.setItem(keyOf(COMPANIES), '{ this is : not json');
+describe('request shape', () => {
+  it('read → GET /api/records with the sheet', async () => {
+    const fetchMock = mockFetch([{ id: 'c1', name: 'Acme' }]);
+    const rows = await store.read<{ name: string }>(COMPANIES);
 
-    expect(await store.read(COMPANIES)).toEqual([]);
-    const backups = keysWithPrefix(`${keyOf(COMPANIES)}:corrupt:`);
-    expect(backups).toHaveLength(1);
-    expect(window.localStorage.getItem(backups[0])).toBe('{ this is : not json');
-
-    // A later write replaces the main key but the recovery backup survives.
-    await store.append(COMPANIES, { name: 'fresh' });
-    expect(await store.read<{ name: string }>(COMPANIES)).toHaveLength(1);
-    expect(window.localStorage.getItem(backups[0])).toBe('{ this is : not json');
+    expect(rows).toEqual([{ id: 'c1', name: 'Acme' }]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/records?sheet=Companies');
+    expect(init?.method ?? 'GET').toBe('GET');
   });
 
-  it('treats a valid-but-non-array blob as corruption', async () => {
-    window.localStorage.setItem(keyOf(COMPANIES), '{"not":"an array"}');
-    expect(await store.read(COMPANIES)).toEqual([]);
-    expect(keysWithPrefix(`${keyOf(COMPANIES)}:corrupt:`).length).toBeGreaterThan(0);
-  });
-});
+  it('append → POST with the row as JSON body', async () => {
+    const fetchMock = mockFetch({ id: 'new', name: 'Acme' });
+    const created = await store.append(COMPANIES, { name: 'Acme' });
 
-describe('overwriteMany (atomic)', () => {
-  it('writes multiple sheets at once', async () => {
+    expect(created).toEqual({ id: 'new', name: 'Acme' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/records?sheet=Companies');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({ name: 'Acme' });
+  });
+
+  it('update → PATCH with sheet + id and the patch body', async () => {
+    const fetchMock = mockFetch({ id: 'c1', name: 'B' });
+    await store.update(COMPANIES, 'c1', { name: 'B' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/records?sheet=Companies&id=c1');
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(init?.body as string)).toEqual({ name: 'B' });
+  });
+
+  it('remove → DELETE with sheet + id', async () => {
+    const fetchMock = mockFetch({ id: 'c1' });
+    await store.remove(COMPANIES, 'c1');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/records?sheet=Companies&id=c1');
+    expect(init?.method).toBe('DELETE');
+  });
+
+  it('overwriteMany → POST /api/bulk with all updates', async () => {
+    const fetchMock = mockFetch({ ok: true });
     await store.overwriteMany([
-      { sheet: COMPANIES, rows: [{ id: 'c1', name: 'A' }] },
-      { sheet: SESSIONS, rows: [{ id: 's1', companyId: 'c1' }] },
+      { sheet: COMPANIES, rows: [{ id: 'c1' }] },
+      { sheet: SESSIONS, rows: [{ id: 's1' }] },
     ]);
-    expect(await store.read(COMPANIES)).toHaveLength(1);
-    expect(await store.read(SESSIONS)).toHaveLength(1);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/bulk');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      updates: [
+        { sheet: 'Companies', rows: [{ id: 'c1' }] },
+        { sheet: 'ConsultingSessions', rows: [{ id: 's1' }] },
+      ],
+    });
   });
 
-  it('rolls every sheet back if any write fails', async () => {
-    await store.append(COMPANIES, { name: 'Seed' });
-    const before = window.localStorage.getItem(keyOf(COMPANIES));
+  it('encodes ids that contain URL-special characters', async () => {
+    const fetchMock = mockFetch({ id: 'a b&c' });
+    await store.remove(COMPANIES, 'a b&c');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/records?sheet=Companies&id=a+b%26c');
+  });
+});
 
-    // Make the SESSIONS write throw (simulating a quota error on the 2nd key).
-    const real = window.localStorage.setItem.bind(window.localStorage);
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation((k: string, v: string) => {
-      if (k === keyOf(SESSIONS)) throw new DOMException('quota', 'QuotaExceededError');
-      real(k, v);
-    });
+describe('error handling', () => {
+  it('surfaces the server error message on a non-2xx response', async () => {
+    mockFetch({ error: 'No record with id "x" in "Companies".' }, { status: 404 });
+    await expect(store.update(COMPANIES, 'x', { name: 'B' })).rejects.toThrow(
+      'No record with id "x" in "Companies".'
+    );
+  });
 
-    await expect(
-      store.overwriteMany([
-        { sheet: COMPANIES, rows: [{ id: 'x' }, { id: 'y' }] },
-        { sheet: SESSIONS, rows: [{ id: 'z' }] },
-      ])
-    ).rejects.toBeTruthy();
-
-    // Companies restored to its prior value — not the half-written [x, y].
-    expect(window.localStorage.getItem(keyOf(COMPANIES))).toBe(before);
-    expect(window.localStorage.getItem(keyOf(SESSIONS))).toBeNull();
+  it('gives a friendly message when the network is unreachable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      })
+    );
+    await expect(store.read(COMPANIES)).rejects.toThrow(/Could not reach the server/);
   });
 });

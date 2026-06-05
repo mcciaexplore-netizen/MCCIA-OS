@@ -1,6 +1,6 @@
 # MCCIA Intern OS
 
-A personal workspace for an AI intern at MCCIA to manage **consulting engagements**, **app development projects**, and **social media creatives** across multiple client companies. Data is stored locally in your browser — no backend, no database, no setup.
+A personal workspace for an AI intern at MCCIA to manage **consulting engagements**, **app development projects**, and **social media creatives** across multiple client companies. Data is stored in a shared **Neon (Postgres)** database via lightweight serverless functions, so records are durable and visible to every signed-in user on any device.
 
 ## Tech stack
 
@@ -30,17 +30,21 @@ A personal workspace for an AI intern at MCCIA to manage **consulting engagement
 
 ```bash
 npm install
-npm run dev    # http://localhost:5173
+cp .env.example .env.local   # then fill in DATABASE_URL (Neon connection string)
+npm run db:setup             # create the database schema (run once)
+npm run dev                  # http://localhost:5173
 ```
 
-That's it — no environment variables, no credentials. Add companies, sessions,
-projects, and creatives in the app and they're saved immediately.
+`npm run dev` serves the data API from the same Neon database as production via a
+small Vite middleware, so local and deployed behaviour match. Add companies,
+sessions, projects, and creatives in the app and they're saved to Neon.
 
 ### Scripts
 
 | Script | Description |
 | --- | --- |
-| `npm run dev` | Start the Vite dev server |
+| `npm run dev` | Start the Vite dev server (with the local data API) |
+| `npm run db:setup` | Create the Neon schema (idempotent; reads `.env.local`) |
 | `npm run build` | Type-check (`tsc -b`) and build for production |
 | `npm run preview` | Preview the production build locally |
 | `npm run typecheck` | Run `tsc --noEmit` |
@@ -53,50 +57,61 @@ projects, and creatives in the app and they're saved immediately.
 
 ## Data & storage
 
-All records are stored in the browser's **`localStorage`**, one array per entity,
-keyed as `mccia:data:<Sheet>`. The data layer ([`src/api/sheets.ts`](src/api/sheets.ts))
-exposes `read / append / update / remove` (generating `id`, `createdAt`,
-`updatedAt` on write), so the rest of the app — hooks, optimistic updates,
-forms — is storage-agnostic.
+Records live in a shared **Neon (Postgres)** database. Each entity is stored in a
+single generic `records` table keyed by `(sheet, id)` with the row held as
+`jsonb` — mirroring the old "one array per sheet" model, so the evolving data
+model needs no per-field migrations.
 
-- **Persistence:** whatever you enter stays until you clear the browser's site
-  data. Reloads, restarts, and closing the tab don't erase it.
-- **Per-browser/device:** the data lives in the browser you used; it isn't synced
-  across machines. Use **Settings → Export all data** to download a JSON backup.
-- **Capacity:** `localStorage` holds a few MB — plenty for text records. The only
-  realistic way to fill it is attaching many large base64 images to creatives.
-- **Resilience:** if a stored blob is ever unreadable it's copied aside under a
-  `…:corrupt:<ts>` key rather than silently overwritten, and bulk imports are
-  written atomically (all-or-nothing).
+The browser never touches the database directly. The frontend store
+([`src/api/sheets.ts`](src/api/sheets.ts)) calls same-origin serverless functions
+in [`api/`](api/), which run the shared handlers in [`server/`](server/) against
+Neon. Its surface (`read / append / update / remove / overwriteMany`, with `id` and
+timestamps generated server-side) is unchanged, so the hooks, optimistic updates,
+and forms are storage-agnostic.
+
+- **Durable & shared:** what anyone enters is saved to Neon and visible to every
+  signed-in user, on any device.
+- **Atomic bulk import:** `overwriteMany` replaces a sheet's contents inside a
+  single transaction — all-or-nothing, never a half-written batch.
+- **Credentials stay server-side:** `DATABASE_URL` is only read by the functions
+  and the dev middleware; it is never bundled into the client.
 
 > **Security note:** the profile login is a *client-side gate*, not real
-> authentication — password hashes ship in the bundle and the data is readable
-> from devtools. It keeps casual users out; it is not a cryptographic boundary.
->
-> A **Neon (Postgres) backend** is planned to replace browser storage for
-> durable, multi-device data and server-side auth. The storage layer is isolated
-> behind [`src/api/sheets.ts`](src/api/sheets.ts) so that swap stays localized.
+> authentication — password hashes ship in the bundle. The data API is guarded
+> only by a shared `APP_API_KEY` (which also ships in the bundle), so it is the
+> same "keeps casual users out" tier, not a per-user authorization boundary. For
+> real security, add server-side sessions/login in front of the API.
 
 ## Deployment
 
-The app is a static SPA — no server or environment variables required. Build it
-and host the `dist/` folder anywhere (Vercel, Netlify, GitHub Pages, S3, …):
+The app deploys to **Vercel** as a static SPA plus the serverless functions in
+[`api/`](api/). Set these environment variables in the Vercel project (Settings →
+Environment Variables) before deploying:
+
+| Variable | Scope | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | Server | Neon connection string (secret). |
+| `APP_API_KEY` | Server | Shared key the API requires; pick any random string. |
+| `VITE_APP_API_KEY` | Build | Must equal `APP_API_KEY` so the client can call the API. |
 
 ```bash
-npm run build      # outputs to dist/
-npm run preview    # optional: preview the production build locally
+npm run build      # type-checks and outputs the SPA to dist/
 ```
 
-`vercel.json` is included for Vercel (Vite preset + SPA rewrite). On any static
-host, just serve `dist/` and rewrite unknown routes to `index.html` for client
-routing.
+`vercel.json` configures the Vite preset, security headers, and the SPA rewrite.
+The `/api/*` functions take precedence over the catch-all rewrite, so the
+database API and client routing coexist. Run `npm run db:setup` once against the
+production database to create the schema.
 
 ## Project structure
 
 ```
 vercel.json     Build + SPA-routing config for Vercel
+api/            Vercel serverless functions (records, bulk) — thin adapters
+server/         Neon-backed data store + runtime-agnostic API handlers
+scripts/        db:setup (schema) + hash-password helper
 src/
-  api/          Local data store (localStorage) + query keys
+  api/          Remote data store (calls /api) + query keys
   app/          App-level providers (React Query client, Providers)
   auth/         Profile login: context/provider/hook, roster, password hashing
   components/
@@ -113,6 +128,6 @@ src/
 
 ## Notes
 
-- Data is browser-local and per-device; it isn't synced or shared. Take periodic
-  JSON backups from **Settings → Export all data**.
+- Data is shared across all users via Neon. **Settings → Export all data** still
+  produces a JSON backup on demand.
 - No sample/seed data is included — every view starts empty until you add records.

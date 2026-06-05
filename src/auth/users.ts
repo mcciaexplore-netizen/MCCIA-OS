@@ -13,7 +13,7 @@
  *
  *     npx tsx scripts/hash-password.ts "your-new-password"
  *
- * Defaults: password `mccia2026`, recovery code `mccia-recovery-2026`.
+ * Defaults: password `mccia26`, recovery code `mccia-recovery-2026`.
  */
 
 /** A profile shown on the login screen (with its secret hashes). */
@@ -34,13 +34,13 @@ export interface AppUser {
 /** Public view of the signed-in user (no secrets). */
 export type SessionUser = Omit<AppUser, 'passwordHash' | 'recoveryHash'>;
 
-// SHA-256 of "mccia2026" / "mccia-recovery-2026" — the shared defaults.
-const DEFAULT_PASSWORD_HASH = '1c1549e818b3e37eee062904de95c65db4f9e2e06d6fad3dbefbb426478f53d6';
+// SHA-256 of "mccia26" / "mccia-recovery-2026" — the shared defaults.
+const DEFAULT_PASSWORD_HASH = '1ad6be2ee26346ca6748ae49755dd9ff4c9cf850aa87bf82693a7cc889c7bc85';
 const DEFAULT_RECOVERY_HASH = 'c41176a8fcd37d1487a9a0bfd01135b3ff9532a7f41302a7207a68dbddf0dd93';
 
 /**
- * The people who can sign in. Add more entries here to bring back the
- * profile-picker; with a single entry the login goes straight to the password.
+ * The people who can sign in. Add more entries here to extend the profile
+ * picker; a single entry skips it and goes straight to the password.
  */
 export const APP_USERS: AppUser[] = [
   {
@@ -48,6 +48,30 @@ export const APP_USERS: AppUser[] = [
     name: 'Sujal',
     emoji: '😎',
     role: 'MCCIA Pune',
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    recoveryHash: DEFAULT_RECOVERY_HASH,
+  },
+  {
+    id: 'pratik',
+    name: 'Pratik',
+    emoji: '🧑‍💻',
+    role: 'MCCIA Pune',
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    recoveryHash: DEFAULT_RECOVERY_HASH,
+  },
+  {
+    id: 'intern1',
+    name: 'Intern 1',
+    emoji: '🌟',
+    role: 'Intern',
+    passwordHash: DEFAULT_PASSWORD_HASH,
+    recoveryHash: DEFAULT_RECOVERY_HASH,
+  },
+  {
+    id: 'intern2',
+    name: 'Intern 2',
+    emoji: '🚀',
+    role: 'Intern',
     passwordHash: DEFAULT_PASSWORD_HASH,
     recoveryHash: DEFAULT_RECOVERY_HASH,
   },
