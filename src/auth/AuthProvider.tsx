@@ -1,44 +1,38 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, type ReactNode } from 'react';
 import { AuthContext, type AuthContextValue } from './auth-context';
-import { effectiveUserById } from './account';
-import { toSessionUser, type SessionUser } from './users';
+import { authClient } from './authClient';
+import { toSessionUser } from './users';
 
 /**
- * Per-session auth. The signed-in profile id is kept in `sessionStorage`, so a
- * page reload stays signed in but opening a fresh browser session (or new tab)
- * asks for the password again. Profile details resolve through the override
- * layer (`account.ts`) so name/emoji changes are reflected everywhere.
+ * Auth state backed by Better Auth (session in Neon). `useSession` keeps the
+ * signed-in user live; sign-in/out and profile changes update it automatically.
  */
-const SESSION_KEY = 'mccia:auth:user';
-
-function readStoredUser(): SessionUser | null {
-  if (typeof window === 'undefined') return null;
-  const id = window.sessionStorage.getItem(SESSION_KEY);
-  if (!id) return null;
-  const user = effectiveUserById(id);
-  return user ? toSessionUser(user) : null;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<SessionUser | null>(readStoredUser);
+  const session = authClient.useSession();
+  const sessionUser = session.data?.user ?? null;
 
-  const signIn = useCallback((next: SessionUser) => {
-    window.sessionStorage.setItem(SESSION_KEY, next.id);
-    setUser(next);
+  const user = useMemo(
+    () => (sessionUser ? toSessionUser(sessionUser) : null),
+    [sessionUser]
+  );
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { error } = await authClient.signIn.email({ email, password });
+    if (error) return { ok: false, error: error.message || 'Sign in failed' };
+    return { ok: true };
   }, []);
 
-  const signOut = useCallback(() => {
-    window.sessionStorage.removeItem(SESSION_KEY);
-    setUser(null);
+  const signOut = useCallback(async () => {
+    await authClient.signOut();
   }, []);
 
-  const reloadUser = useCallback(() => {
-    setUser(readStoredUser());
-  }, []);
+  const refresh = useCallback(() => {
+    void session.refetch();
+  }, [session]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, signIn, signOut, reloadUser }),
-    [user, signIn, signOut, reloadUser]
+    () => ({ user, isLoading: session.isPending, signIn, signOut, refresh }),
+    [user, session.isPending, signIn, signOut, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

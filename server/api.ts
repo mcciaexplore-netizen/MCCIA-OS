@@ -5,10 +5,8 @@
  * and the Vite dev middleware, so local `npm run dev` and the deployed app talk
  * to Neon through identical logic.
  *
- * Access is gated by a shared `APP_API_KEY` (sent as the `x-app-key` header).
- * This is the same "keeps casual users out" tier as the client-side login — it
- * is NOT real per-user authorization. For that you would add server-side
- * sessions; see the note in src/auth/users.ts.
+ * Every request must carry a valid Better Auth session (the browser sends the
+ * session cookie automatically on same-origin calls). No session → 401.
  */
 
 import {
@@ -21,6 +19,7 @@ import {
   updateRow,
   type Sheet,
 } from './store';
+import { getAuth } from './auth';
 
 export interface ApiRequest {
   method: string;
@@ -42,10 +41,11 @@ function fail(status: number, error: string): ApiResponse {
   return { status, body: { error } };
 }
 
-function authorized(req: ApiRequest): boolean {
-  const expected = process.env.APP_API_KEY;
-  if (!expected) return true; // no key configured (e.g. local dev) → open
-  return req.headers['x-app-key'] === expected;
+async function authorized(req: ApiRequest): Promise<boolean> {
+  const session = await getAuth().api.getSession({
+    headers: new Headers({ cookie: req.headers.cookie ?? '' }),
+  });
+  return !!session?.session;
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -54,7 +54,7 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 /** GET / POST / PATCH / DELETE on a single sheet — `/api/records`. */
 export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
-  if (!authorized(req)) return fail(401, 'Unauthorized');
+  if (!(await authorized(req))) return fail(401, 'Sign in required');
 
   const sheet = req.query.sheet;
   if (!isSheet(sheet)) return fail(400, `Unknown or missing sheet "${sheet ?? ''}"`);
@@ -86,7 +86,7 @@ export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
 
 /** Atomic multi-sheet replace — `POST /api/bulk` with `{ updates: [...] }`. */
 export async function handleBulk(req: ApiRequest): Promise<ApiResponse> {
-  if (!authorized(req)) return fail(401, 'Unauthorized');
+  if (!(await authorized(req))) return fail(401, 'Sign in required');
   if (req.method !== 'POST') return fail(405, `Method ${req.method} not allowed`);
 
   const body = asRecord(req.body);

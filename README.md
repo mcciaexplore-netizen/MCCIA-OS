@@ -20,7 +20,7 @@ A personal workspace for an AI intern at MCCIA to manage **consulting engagement
 - **Command palette** (`⌘K` / `Ctrl+K` or `/`) — search across companies, sessions, and projects and jump to any result.
 - **Keyboard shortcuts** — `N` = new entry (context-aware per page), `/` = search, `D` = dashboard.
 - **Notification bell** — count of overdue items, with a dropdown to jump to each.
-- **Profile login** — a password-gated profile picker guards the workspace (client-side gate — see the Security note under *Data & storage*).
+- **Authentication** — a profile picker + password backed by [Better Auth](https://better-auth.com) with sessions in Neon. Every data API call requires a valid session.
 - **Bulk Excel import / export** — import consultations from an Excel/CSV file, pasted cells, or a public Google Sheets link; export everything back to `.xlsx`.
 - **Settings** — preferences (default follow-up interval, theme, timezone) and data management (Excel import/export, export all data as JSON, clear cache).
 - **Resilient UX** — optimistic updates with rollback, per-route error boundaries, loading skeletons, and empty/error states everywhere.
@@ -30,14 +30,16 @@ A personal workspace for an AI intern at MCCIA to manage **consulting engagement
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in DATABASE_URL (Neon connection string)
-npm run db:setup             # create the database schema (run once)
+cp .env.example .env.local   # fill in DATABASE_URL + BETTER_AUTH_SECRET (see below)
+npm run db:setup             # create the records table (run once)
 npm run dev                  # http://localhost:5173
 ```
 
-`npm run dev` serves the data API from the same Neon database as production via a
-small Vite middleware, so local and deployed behaviour match. Add companies,
-sessions, projects, and creatives in the app and they're saved to Neon.
+`npm run dev` serves both the data API and the Better Auth routes (`/api/auth/*`)
+against the same Neon database as production via a small Vite middleware, so local
+and deployed behaviour match. Add companies, sessions, projects, and creatives in
+the app and they're saved to Neon. Sign in with one of the seeded accounts (e.g.
+`sujal@mcciapune.com`).
 
 ### Scripts
 
@@ -52,8 +54,10 @@ sessions, projects, and creatives in the app and they're saved to Neon.
 | `npm test` | Run the Vitest unit suite |
 | `npm run test:watch` | Run Vitest in watch mode |
 
-> Set or change a login password with `npx tsx scripts/hash-password.ts "new-password"`
-> and paste the printed hash into [`src/auth/users.ts`](src/auth/users.ts).
+> Users live in the Neon database (Better Auth). Signed-in users change their own
+> password in **Settings → Account**. The login picker's names/emojis/emails are
+> display metadata in [`src/auth/users.ts`](src/auth/users.ts) — keep its emails in
+> sync with the accounts in the database.
 
 ## Data & storage
 
@@ -73,14 +77,26 @@ and forms are storage-agnostic.
   signed-in user, on any device.
 - **Atomic bulk import:** `overwriteMany` replaces a sheet's contents inside a
   single transaction — all-or-nothing, never a half-written batch.
-- **Credentials stay server-side:** `DATABASE_URL` is only read by the functions
-  and the dev middleware; it is never bundled into the client.
+- **Credentials stay server-side:** `DATABASE_URL` and `BETTER_AUTH_SECRET` are
+  only read by the functions and the dev middleware; never bundled into the client.
+- **Server-side auth:** every `/api/records` and `/api/bulk` call checks for a
+  valid Better Auth session (the browser sends the session cookie automatically);
+  no session → `401`.
 
-> **Security note:** the profile login is a *client-side gate*, not real
-> authentication — password hashes ship in the bundle. The data API is guarded
-> only by a shared `APP_API_KEY` (which also ships in the bundle), so it is the
-> same "keeps casual users out" tier, not a per-user authorization boundary. For
-> real security, add server-side sessions/login in front of the API.
+## Authentication
+
+Real authentication via [Better Auth](https://better-auth.com): email + password,
+with users and sessions stored in Neon (the `neon_auth` schema). The flow:
+
+- `server/auth.ts` builds the Better Auth instance (pg pool → Neon `neon_auth`).
+- `api/auth/[...all].ts` (and the Vite dev middleware) serve `/api/auth/*`.
+- The browser uses [`src/auth/authClient.ts`](src/auth/authClient.ts); `AuthProvider`
+  exposes the session to the app, and `<App>` gates every route behind it.
+- The data API authorizes each request via the session cookie (see `server/api.ts`).
+
+Manage accounts in the database; signed-in users change their own password in
+**Settings → Account**. The login picker's display profiles live in
+[`src/auth/users.ts`](src/auth/users.ts).
 
 ## Deployment
 
@@ -88,11 +104,11 @@ The app deploys to **Vercel** as a static SPA plus the serverless functions in
 [`api/`](api/). Set these environment variables in the Vercel project (Settings →
 Environment Variables) before deploying:
 
-| Variable | Scope | Notes |
-| --- | --- | --- |
-| `DATABASE_URL` | Server | Neon connection string (secret). |
-| `APP_API_KEY` | Server | Shared key the API requires; pick any random string. |
-| `VITE_APP_API_KEY` | Build | Must equal `APP_API_KEY` so the client can call the API. |
+| Variable | Notes |
+| --- | --- |
+| `DATABASE_URL` | Neon connection string (secret). |
+| `BETTER_AUTH_SECRET` | Long random string that signs sessions (`openssl rand -base64 32`). Keep stable + secret. |
+| `BETTER_AUTH_URL` | The **exact deployed origin** (e.g. `https://your-app.vercel.app`) — Better Auth checks request origins against it. |
 
 ```bash
 npm run build      # type-checks and outputs the SPA to dist/
@@ -107,13 +123,13 @@ production database to create the schema.
 
 ```
 vercel.json     Build + SPA-routing config for Vercel
-api/            Vercel serverless functions (records, bulk) — thin adapters
-server/         Neon-backed data store + runtime-agnostic API handlers
-scripts/        db:setup (schema) + hash-password helper
+api/            Vercel serverless functions: records, bulk, auth/[...all]
+server/         Neon data store, API handlers, and Better Auth instance
+scripts/        db:setup (schema)
 src/
   api/          Remote data store (calls /api) + query keys
   app/          App-level providers (React Query client, Providers)
-  auth/         Profile login: context/provider/hook, roster, password hashing
+  auth/         Better Auth client + provider/hook/context + display roster
   components/
     command/    Command palette, global shortcuts, new-action registry
     layout/     App shell (Sidebar, TopBar, MobileNav, ...)

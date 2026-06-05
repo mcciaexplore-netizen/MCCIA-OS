@@ -23,8 +23,7 @@ import { SHEET_NAMES, type ThemePreference } from '@/constants';
 import type { Company, ConsultingSession } from '@/types';
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/auth/useAuth';
-import { effectiveUserById, setPasswordHash, setProfile, setRecoveryHash } from '@/auth/account';
-import { sha256Hex, verifyPassword } from '@/auth/hash';
+import { authClient } from '@/auth/authClient';
 import { errorMessage } from '@/hooks/mutationUtils';
 
 // SheetJS-heavy drawer: loaded on demand so it stays out of the Settings chunk.
@@ -67,84 +66,77 @@ export function Settings() {
 }
 
 /* ------------------------------------------------------------------ *
- * Account — name/emoji, password, recovery code
+ * Account — display name + password (auth backed by Neon / Better Auth)
  * ------------------------------------------------------------------ */
 
 function AccountCard() {
-  const { user, reloadUser } = useAuth();
+  const { user, refresh } = useAuth();
 
   const [name, setName] = useState(user?.name ?? '');
-  const [emoji, setEmoji] = useState(user?.emoji ?? '');
+  const [savingName, setSavingName] = useState(false);
 
   const [curPw, setCurPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
-
-  const [recPw, setRecPw] = useState('');
-  const [newRec, setNewRec] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
 
   if (!user) return null;
-  const userId = user.id;
 
-  const saveProfile = () => {
-    if (!name.trim()) {
+  const saveProfile = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
       toast.error('Name cannot be empty.');
       return;
     }
-    setProfile(userId, { name: name.trim(), emoji: emoji.trim() || user.emoji });
-    reloadUser();
+    setSavingName(true);
+    const { error } = await authClient.updateUser({ name: trimmed });
+    setSavingName(false);
+    if (error) {
+      toast.error(error.message || 'Could not update profile');
+      return;
+    }
+    refresh();
     toast.success('Profile updated');
   };
 
-  const verifyCurrent = async (entered: string): Promise<boolean> => {
-    const eff = effectiveUserById(userId);
-    return !!eff && verifyPassword(eff, entered);
-  };
-
   const changePassword = async () => {
-    if (!(await verifyCurrent(curPw))) return toast.error('Current password is incorrect.');
-    if (newPw.length < 4) return toast.error('New password must be at least 4 characters.');
+    if (newPw.length < 6) return toast.error('New password must be at least 6 characters.');
     if (newPw !== confirmPw) return toast.error('New passwords do not match.');
-    setPasswordHash(userId, await sha256Hex(newPw));
+    setChangingPw(true);
+    const { error } = await authClient.changePassword({
+      currentPassword: curPw,
+      newPassword: newPw,
+      revokeOtherSessions: true,
+    });
+    setChangingPw(false);
+    if (error) {
+      toast.error(error.message || 'Could not change password — check your current password.');
+      return;
+    }
     setCurPw('');
     setNewPw('');
     setConfirmPw('');
     toast.success('Password changed');
   };
 
-  const changeRecovery = async () => {
-    if (!(await verifyCurrent(recPw))) return toast.error('Current password is incorrect.');
-    if (newRec.length < 4) return toast.error('Recovery code must be at least 4 characters.');
-    setRecoveryHash(userId, await sha256Hex(newRec));
-    setRecPw('');
-    setNewRec('');
-    toast.success('Recovery code updated');
-  };
-
   return (
-    <SectionCard
-      icon={UserCog}
-      title="Account"
-      description="Your sign-in profile, password, and recovery code (used by “Forgot password”)."
-    >
+    <SectionCard icon={UserCog} title="Account" description="Your display name and password.">
       {/* Profile */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[5rem,1fr,auto] sm:items-end">
-        <FormField label="Avatar" htmlFor="acc-emoji">
-          <TextInput
-            id="acc-emoji"
-            value={emoji}
-            maxLength={4}
-            onChange={(e) => setEmoji(e.target.value)}
-            className="text-center text-xl"
-          />
-        </FormField>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[4rem,1fr,auto] sm:items-end">
+        <div className="flex flex-col">
+          <span className="mb-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">Avatar</span>
+          <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-100 text-2xl dark:bg-slate-800">
+            {user.emoji}
+          </span>
+        </div>
         <FormField label="Display name" htmlFor="acc-name">
           <TextInput id="acc-name" value={name} onChange={(e) => setName(e.target.value)} />
         </FormField>
-        <Button variant="secondary" onClick={saveProfile}>
+        <Button variant="secondary" onClick={saveProfile} loading={savingName}>
           Save profile
         </Button>
       </div>
+      <p className="mt-2 text-xs text-slate-400">Signed in as {user.email}</p>
 
       <hr className="my-4 border-slate-100 dark:border-slate-800" />
 
@@ -165,29 +157,8 @@ function AccountCard() {
         </FormField>
       </div>
       <div className="mt-3 flex justify-end">
-        <Button variant="secondary" onClick={changePassword} disabled={!curPw || !newPw || !confirmPw}>
+        <Button variant="secondary" onClick={changePassword} loading={changingPw} disabled={!curPw || !newPw || !confirmPw}>
           Update password
-        </Button>
-      </div>
-
-      <hr className="my-4 border-slate-100 dark:border-slate-800" />
-
-      {/* Change recovery code */}
-      <p className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">Recovery code</p>
-      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
-        Used to reset your password from the login screen if you forget it. Keep it somewhere safe.
-      </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Current password" htmlFor="acc-recpw">
-          <TextInput id="acc-recpw" type="password" autoComplete="current-password" value={recPw} onChange={(e) => setRecPw(e.target.value)} />
-        </FormField>
-        <FormField label="New recovery code" htmlFor="acc-newrec">
-          <TextInput id="acc-newrec" value={newRec} onChange={(e) => setNewRec(e.target.value)} />
-        </FormField>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <Button variant="secondary" onClick={changeRecovery} disabled={!recPw || !newRec}>
-          Update recovery code
         </Button>
       </div>
     </SectionCard>

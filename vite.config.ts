@@ -3,34 +3,24 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleBulk, handleRecords, type ApiRequest } from './server/api';
+import { handleAuthNode } from './server/authNode';
 
 // https://vite.dev/config/
 
-/** Collect and JSON-parse a request body (undefined for empty/invalid). */
-function readBody(req: IncomingMessage): Promise<unknown> {
+/** Read the full request body as a string ('' when empty). */
+function readRawBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk) => chunks.push(chunk as Buffer));
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8');
-      if (!raw) return resolve(undefined);
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        resolve(undefined);
-      }
-    });
-    req.on('error', () => resolve(undefined));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(''));
   });
 }
 
-function headerValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 /**
- * Serve the Neon-backed data API during `vite dev`, mirroring the Vercel
- * functions in `/api` so `npm run dev` talks to the same database as production.
+ * Serve the Neon-backed data API and Better Auth routes during `vite dev`,
+ * mirroring the Vercel functions in `/api` so `npm run dev` behaves like the
+ * deployed app (same database, same auth).
  */
 function neonApiDevPlugin(): PluginOption {
   return {
@@ -41,6 +31,14 @@ function neonApiDevPlugin(): PluginOption {
         if (!url.startsWith('/api/')) return next();
 
         const parsed = new URL(url, 'http://localhost');
+        const raw = await readRawBody(req);
+
+        // Better Auth owns everything under /api/auth.
+        if (parsed.pathname.startsWith('/api/auth')) {
+          await handleAuthNode(req, res, raw);
+          return;
+        }
+
         const route =
           parsed.pathname === '/api/records'
             ? handleRecords
@@ -49,11 +47,20 @@ function neonApiDevPlugin(): PluginOption {
               : null;
         if (!route) return next();
 
+        let body: unknown;
+        if (raw) {
+          try {
+            body = JSON.parse(raw);
+          } catch {
+            body = undefined;
+          }
+        }
+
         const apiReq: ApiRequest = {
           method: req.method ?? 'GET',
           query: Object.fromEntries(parsed.searchParams.entries()),
-          body: await readBody(req),
-          headers: { 'x-app-key': headerValue(req.headers['x-app-key']) },
+          body,
+          headers: { cookie: req.headers.cookie },
         };
 
         res.setHeader('content-type', 'application/json');
@@ -74,8 +81,9 @@ export default defineConfig(({ mode }) => {
   // The dev middleware runs in Node and needs the server-only secrets. Vite only
   // exposes VITE_* to the client, so lift these into process.env explicitly.
   const env = loadEnv(mode, process.cwd(), '');
-  if (env.DATABASE_URL && !process.env.DATABASE_URL) process.env.DATABASE_URL = env.DATABASE_URL;
-  if (env.APP_API_KEY && !process.env.APP_API_KEY) process.env.APP_API_KEY = env.APP_API_KEY;
+  for (const key of ['DATABASE_URL', 'BETTER_AUTH_SECRET', 'BETTER_AUTH_URL'] as const) {
+    if (env[key] && !process.env[key]) process.env[key] = env[key];
+  }
 
   return {
     plugins: [react(), neonApiDevPlugin()],

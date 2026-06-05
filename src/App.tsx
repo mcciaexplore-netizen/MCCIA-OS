@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Login } from '@/pages/Login';
 import { useAuth } from '@/auth/useAuth';
 import { useStorageSync } from '@/hooks/useStorageSync';
+import { Spinner } from '@/components/ui/Spinner';
 import { ROUTES } from '@/constants';
 
 /**
@@ -26,8 +27,17 @@ const NotFoundPage = lazy(() =>
 
 /** Route table. Every module page nests inside the persistent app shell. */
 export default function App() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   useStorageSync();
+
+  // Wait for the initial session check so we don't flash the login screen.
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <Spinner />
+      </div>
+    );
+  }
 
   // Gate the whole app behind the profile-picker login.
   if (!user) return <Login />;

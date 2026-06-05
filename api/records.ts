@@ -7,7 +7,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     method: req.method ?? 'GET',
     query: req.query as Record<string, string | undefined>,
     body: req.body,
-    headers: { 'x-app-key': firstHeader(req.headers['x-app-key']) },
+    headers: { cookie: firstHeader(req.headers.cookie) },
   });
   res.status(result.status).json(result.body);
 }
