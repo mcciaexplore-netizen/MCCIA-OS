@@ -139,7 +139,7 @@ function ProfilePicker({
       <p className="mt-1 text-center text-sm text-slate-500 dark:text-slate-400">
         Pick your profile, then enter your password.
       </p>
-      <div className="mt-6 flex snap-x flex-wrap justify-center gap-3 pb-1">
+      <div className="mt-6 flex snap-x gap-3 overflow-x-auto pb-3">
         {profiles.map((profile) => (
           <button
             key={profile.email}

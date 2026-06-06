@@ -1,6 +1,6 @@
 # MCCIA Intern OS
 
-A personal workspace for an AI intern at MCCIA to manage **consulting engagements**, **app development projects**, and **social media creatives** across multiple client companies. Data is stored in a shared **Neon (Postgres)** database via lightweight serverless functions, so records are durable and visible to every signed-in user on any device.
+A personal workspace for an AI intern at MCCIA to manage **consulting engagements**, **app development projects**, and **social media creatives** across multiple client companies. Data is stored in **Neon (Postgres)** via lightweight serverless functions and is **private to each signed-in user** — everyone gets the same features, their own data.
 
 ## Tech stack
 
@@ -61,10 +61,11 @@ the app and they're saved to Neon. Sign in with one of the seeded accounts (e.g.
 
 ## Data & storage
 
-Records live in a shared **Neon (Postgres)** database. Each entity is stored in a
-single generic `records` table keyed by `(sheet, id)` with the row held as
-`jsonb` — mirroring the old "one array per sheet" model, so the evolving data
-model needs no per-field migrations.
+Records live in **Neon (Postgres)**. Each entity is stored in a single generic
+`records` table keyed by `(sheet, id)` with the row held as `jsonb` — mirroring
+the old "one array per sheet" model, so the evolving data model needs no
+per-field migrations. An `owner_id` column scopes every row to the user who
+created it, so each user reads and writes only their own data.
 
 The browser never touches the database directly. The frontend store
 ([`src/api/sheets.ts`](src/api/sheets.ts)) calls same-origin serverless functions
@@ -73,10 +74,11 @@ Neon. Its surface (`read / append / update / remove / overwriteMany`, with `id` 
 timestamps generated server-side) is unchanged, so the hooks, optimistic updates,
 and forms are storage-agnostic.
 
-- **Durable & shared:** what anyone enters is saved to Neon and visible to every
-  signed-in user, on any device.
-- **Atomic bulk import:** `overwriteMany` replaces a sheet's contents inside a
-  single transaction — all-or-nothing, never a half-written batch.
+- **Durable & per-user:** each signed-in user's records are private to them and
+  follow them to any device. The server derives the owner from the session — the
+  client can't read or write another user's data.
+- **Atomic bulk import:** `overwriteMany` replaces the current user's rows for a
+  sheet inside a single transaction — all-or-nothing, never a half-written batch.
 - **Credentials stay server-side:** `DATABASE_URL` and `BETTER_AUTH_SECRET` are
   only read by the functions and the dev middleware; never bundled into the client.
 - **Server-side auth:** every `/api/records` and `/api/bulk` call checks for a
@@ -144,6 +146,6 @@ src/
 
 ## Notes
 
-- Data is shared across all users via Neon. **Settings → Export all data** still
-  produces a JSON backup on demand.
+- Each user's data is private (scoped by `owner_id` in Neon). **Settings → Export
+  all data** produces a JSON backup of the current user's data on demand.
 - No sample/seed data is included — every view starts empty until you add records.

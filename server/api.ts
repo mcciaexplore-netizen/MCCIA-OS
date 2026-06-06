@@ -41,11 +41,12 @@ function fail(status: number, error: string): ApiResponse {
   return { status, body: { error } };
 }
 
-async function authorized(req: ApiRequest): Promise<boolean> {
+/** The signed-in user's id from the session cookie, or null if not signed in. */
+async function sessionUserId(req: ApiRequest): Promise<string | null> {
   const session = await getAuth().api.getSession({
     headers: new Headers({ cookie: req.headers.cookie ?? '' }),
   });
-  return !!session?.session;
+  return session?.user?.id ?? null;
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -54,7 +55,8 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 /** GET / POST / PATCH / DELETE on a single sheet — `/api/records`. */
 export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
-  if (!(await authorized(req))) return fail(401, 'Sign in required');
+  const ownerId = await sessionUserId(req);
+  if (!ownerId) return fail(401, 'Sign in required');
 
   const sheet = req.query.sheet;
   if (!isSheet(sheet)) return fail(400, `Unknown or missing sheet "${sheet ?? ''}"`);
@@ -63,18 +65,18 @@ export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
     await ensureSchemaOnce();
     switch (req.method) {
       case 'GET':
-        return ok(await readSheet(sheet));
+        return ok(await readSheet(sheet, ownerId));
       case 'POST':
-        return ok(await appendRow(sheet, asRecord(req.body)));
+        return ok(await appendRow(sheet, ownerId, asRecord(req.body)));
       case 'PATCH': {
         const id = req.query.id;
         if (!id) return fail(400, 'id is required');
-        return ok(await updateRow(sheet, id, asRecord(req.body)));
+        return ok(await updateRow(sheet, ownerId, id, asRecord(req.body)));
       }
       case 'DELETE': {
         const id = req.query.id;
         if (!id) return fail(400, 'id is required');
-        return ok(await removeRow(sheet, id));
+        return ok(await removeRow(sheet, ownerId, id));
       }
       default:
         return fail(405, `Method ${req.method} not allowed`);
@@ -86,7 +88,8 @@ export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
 
 /** Atomic multi-sheet replace — `POST /api/bulk` with `{ updates: [...] }`. */
 export async function handleBulk(req: ApiRequest): Promise<ApiResponse> {
-  if (!(await authorized(req))) return fail(401, 'Sign in required');
+  const ownerId = await sessionUserId(req);
+  if (!ownerId) return fail(401, 'Sign in required');
   if (req.method !== 'POST') return fail(405, `Method ${req.method} not allowed`);
 
   const body = asRecord(req.body);
@@ -103,7 +106,7 @@ export async function handleBulk(req: ApiRequest): Promise<ApiResponse> {
 
   try {
     await ensureSchemaOnce();
-    await overwriteMany(cleaned);
+    await overwriteMany(ownerId, cleaned);
     return ok({ ok: true });
   } catch (error) {
     return fail(500, error instanceof Error ? error.message : 'Server error');

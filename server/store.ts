@@ -58,12 +58,16 @@ export async function ensureSchema(): Promise<void> {
     create table if not exists records (
       sheet      text        not null,
       id         text        not null,
+      owner_id   uuid,
       data       jsonb       not null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       primary key (sheet, id)
     )`;
-  await db`create index if not exists records_sheet_created_idx on records (sheet, created_at)`;
+  // `owner_id` scopes every record to the user who created it (added after the
+  // table first shipped, so guard with "if not exists").
+  await db`alter table records add column if not exists owner_id uuid`;
+  await db`create index if not exists records_owner_sheet_idx on records (owner_id, sheet, created_at)`;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -80,66 +84,84 @@ export function ensureSchemaOnce(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ *
- * CRUD — mirrors the old LocalDataStore surface
+ * CRUD — scoped to one owner (the signed-in user)
+ *
+ * Every query is filtered by `owner_id`, so each user only ever reads or writes
+ * their own rows. The app's features are identical for everyone; the data is
+ * partitioned per user id.
  * ------------------------------------------------------------------ */
 
-/** All rows of a sheet, oldest first (matches the old append order). */
-export async function readSheet<T = Row>(sheet: Sheet): Promise<T[]> {
+/** All of one owner's rows for a sheet, oldest first (matches append order). */
+export async function readSheet<T = Row>(sheet: Sheet, ownerId: string): Promise<T[]> {
   const rows = await sql()`
     select data from records
-    where sheet = ${sheet}
+    where sheet = ${sheet} and owner_id = ${ownerId}
     order by created_at asc, id asc`;
   return rows.map((r) => r.data as T);
 }
 
-/** Append a new row; the server owns `id`, `createdAt`, `updatedAt`. */
-export async function appendRow<T = Row>(sheet: Sheet, row: Row): Promise<T> {
+/** Append a new row owned by `ownerId`; the server owns id + timestamps. */
+export async function appendRow<T = Row>(sheet: Sheet, ownerId: string, row: Row): Promise<T> {
   const now = nowIso();
   const id = randomUUID();
   const record: Row = { ...row, id, createdAt: now, updatedAt: now };
   await sql()`
-    insert into records (sheet, id, data, created_at, updated_at)
-    values (${sheet}, ${id}, ${JSON.stringify(record)}::jsonb, ${now}, ${now})`;
+    insert into records (sheet, id, owner_id, data, created_at, updated_at)
+    values (${sheet}, ${id}, ${ownerId}, ${JSON.stringify(record)}::jsonb, ${now}, ${now})`;
   return record as T;
 }
 
-/** Merge `fields` into one row and bump `updatedAt`. */
-export async function updateRow<T = Row>(sheet: Sheet, id: string, fields: Row): Promise<T> {
-  const existing = await sql()`select data from records where sheet = ${sheet} and id = ${id}`;
+/** Merge `fields` into one of the owner's rows and bump `updatedAt`. */
+export async function updateRow<T = Row>(
+  sheet: Sheet,
+  ownerId: string,
+  id: string,
+  fields: Row
+): Promise<T> {
+  const existing = await sql()`
+    select data from records where sheet = ${sheet} and id = ${id} and owner_id = ${ownerId}`;
   if (existing.length === 0) throw new Error(`No record with id "${id}" in "${sheet}".`);
   const now = nowIso();
   const merged: Row = { ...(existing[0].data as Row), ...fields, id, updatedAt: now };
   await sql()`
     update records set data = ${JSON.stringify(merged)}::jsonb, updated_at = ${now}
-    where sheet = ${sheet} and id = ${id}`;
+    where sheet = ${sheet} and id = ${id} and owner_id = ${ownerId}`;
   return merged as T;
 }
 
-/** Delete one row. */
-export async function removeRow(sheet: Sheet, id: string): Promise<{ id: string }> {
-  await sql()`delete from records where sheet = ${sheet} and id = ${id}`;
+/** Delete one of the owner's rows. */
+export async function removeRow(
+  sheet: Sheet,
+  ownerId: string,
+  id: string
+): Promise<{ id: string }> {
+  await sql()`delete from records where sheet = ${sheet} and id = ${id} and owner_id = ${ownerId}`;
   return { id };
 }
 
 /**
- * Atomically replace the full contents of one or more sheets in a single
- * transaction. The given rows are full records (they already carry id +
- * timestamps from the import); we preserve those and only fill in any gaps, so a
- * bulk import is all-or-nothing — it never leaves a half-written batch behind.
+ * Atomically replace the contents of one or more sheets FOR THIS OWNER in a
+ * single transaction (only the owner's rows are cleared/rewritten — other users'
+ * data is untouched). The given rows are full records (they already carry id +
+ * timestamps from the import); we preserve those and fill any gaps, so a bulk
+ * import is all-or-nothing — never a half-written batch.
  */
-export async function overwriteMany(updates: { sheet: Sheet; rows: Row[] }[]): Promise<void> {
+export async function overwriteMany(
+  ownerId: string,
+  updates: { sheet: Sheet; rows: Row[] }[]
+): Promise<void> {
   const db = sql();
   const queries: ReturnType<typeof db>[] = [];
   for (const { sheet, rows } of updates) {
-    queries.push(db`delete from records where sheet = ${sheet}`);
+    queries.push(db`delete from records where sheet = ${sheet} and owner_id = ${ownerId}`);
     for (const row of rows) {
       const id = typeof row.id === 'string' && row.id ? row.id : randomUUID();
       const createdAt = typeof row.createdAt === 'string' && row.createdAt ? row.createdAt : nowIso();
       const updatedAt = typeof row.updatedAt === 'string' && row.updatedAt ? row.updatedAt : createdAt;
       const record: Row = { ...row, id, createdAt, updatedAt };
       queries.push(db`
-        insert into records (sheet, id, data, created_at, updated_at)
-        values (${sheet}, ${id}, ${JSON.stringify(record)}::jsonb, ${createdAt}, ${updatedAt})`);
+        insert into records (sheet, id, owner_id, data, created_at, updated_at)
+        values (${sheet}, ${id}, ${ownerId}, ${JSON.stringify(record)}::jsonb, ${createdAt}, ${updatedAt})`);
     }
   }
   await db.transaction(queries);

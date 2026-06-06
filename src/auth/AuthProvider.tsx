@@ -2,6 +2,7 @@ import { useCallback, useMemo, type ReactNode } from 'react';
 import { AuthContext, type AuthContextValue } from './auth-context';
 import { authClient } from './authClient';
 import { toSessionUser } from './users';
+import { queryClient } from '@/app/queryClient';
 
 /**
  * Auth state backed by Better Auth (session in Neon). `useSession` keeps the
@@ -19,11 +20,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await authClient.signIn.email({ email, password });
     if (error) return { ok: false, error: error.message || 'Sign in failed' };
+    // Drop any cached data from a previous user so this session starts clean.
+    queryClient.clear();
     return { ok: true };
   }, []);
 
   const signOut = useCallback(async () => {
     await authClient.signOut();
+    queryClient.clear();
   }, []);
 
   const refresh = useCallback(() => {

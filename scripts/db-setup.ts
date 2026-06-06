@@ -7,7 +7,7 @@
  * and never touches existing rows. Run it once against a fresh database.
  */
 
-import { ensureSchema, readSheet, SHEETS } from '../server/store';
+import { ensureSchema } from '../server/store';
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
@@ -16,13 +16,7 @@ async function main(): Promise<void> {
   }
 
   await ensureSchema();
-  console.log('✓ Schema ready (records table + index).\n');
-
-  console.log('Current row counts:');
-  for (const sheet of SHEETS) {
-    const rows = await readSheet(sheet);
-    console.log(`  ${sheet.padEnd(20)} ${rows.length}`);
-  }
+  console.log('✓ Schema ready: records table (+ owner_id column and indexes).');
 }
 
 main().catch((error) => {
