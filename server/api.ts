@@ -5,8 +5,8 @@
  * and the Vite dev middleware, so local `npm run dev` and the deployed app talk
  * to Neon through identical logic.
  *
- * Every request must carry a valid Better Auth session (the browser sends the
- * session cookie automatically on same-origin calls). No session → 401.
+ * Every request must carry a valid session cookie (the browser sends it
+ * automatically on same-origin calls). No session → 401.
  */
 
 import {
@@ -19,7 +19,7 @@ import {
   updateRow,
   type Sheet,
 } from './store.js';
-import { getAuth } from './auth.js';
+import { SESSION_COOKIE, readCookie, verifyToken } from './session.js';
 
 export interface ApiRequest {
   method: string;
@@ -42,11 +42,9 @@ function fail(status: number, error: string): ApiResponse {
 }
 
 /** The signed-in user's id from the session cookie, or null if not signed in. */
-async function sessionUserId(req: ApiRequest): Promise<string | null> {
-  const session = await getAuth().api.getSession({
-    headers: new Headers({ cookie: req.headers.cookie ?? '' }),
-  });
-  return session?.user?.id ?? null;
+function sessionUserId(req: ApiRequest): string | null {
+  const payload = verifyToken(readCookie(req.headers.cookie, SESSION_COOKIE));
+  return payload?.sub ?? null;
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -55,7 +53,7 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 /** GET / POST / PATCH / DELETE on a single sheet — `/api/records`. */
 export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
-  const ownerId = await sessionUserId(req);
+  const ownerId = sessionUserId(req);
   if (!ownerId) return fail(401, 'Sign in required');
 
   const sheet = req.query.sheet;
@@ -88,7 +86,7 @@ export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
 
 /** Atomic multi-sheet replace — `POST /api/bulk` with `{ updates: [...] }`. */
 export async function handleBulk(req: ApiRequest): Promise<ApiResponse> {
-  const ownerId = await sessionUserId(req);
+  const ownerId = sessionUserId(req);
   if (!ownerId) return fail(401, 'Sign in required');
   if (req.method !== 'POST') return fail(405, `Method ${req.method} not allowed`);
 

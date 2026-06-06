@@ -22,7 +22,6 @@ import { SHEET_NAMES, type ThemePreference } from '@/constants';
 import type { Company, ConsultingSession } from '@/types';
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/auth/useAuth';
-import { authClient } from '@/auth/authClient';
 import { errorMessage } from '@/hooks/mutationUtils';
 
 // SheetJS-heavy drawer: loaded on demand so it stays out of the Settings chunk.
@@ -69,7 +68,7 @@ export function Settings() {
  * ------------------------------------------------------------------ */
 
 function AccountCard() {
-  const { user, refresh } = useAuth();
+  const { user, updateName } = useAuth();
 
   const [name, setName] = useState(user?.name ?? '');
   const [savingName, setSavingName] = useState(false);
@@ -83,13 +82,12 @@ function AccountCard() {
       return;
     }
     setSavingName(true);
-    const { error } = await authClient.updateUser({ name: trimmed });
+    const { ok, error } = await updateName(trimmed);
     setSavingName(false);
-    if (error) {
-      toast.error(error.message || 'Could not update profile');
+    if (!ok) {
+      toast.error(error || 'Could not update profile');
       return;
     }
-    refresh();
     toast.success('Profile updated');
   };
 

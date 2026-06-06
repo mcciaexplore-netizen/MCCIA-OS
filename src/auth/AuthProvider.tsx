@@ -1,51 +1,60 @@
-import { useCallback, useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthContext, type AuthContextValue } from './auth-context';
-import { authClient } from './authClient';
+import { apiLogin, apiLogout, apiMe, apiUpdateName } from './authClient';
 import { toSessionUser } from './users';
 import { queryClient } from '@/app/queryClient';
 
 /**
- * Auth state backed by Better Auth (session in Neon). `useSession` keeps the
- * signed-in user live; sign-in/out and profile changes update it automatically.
+ * Auth state for the passwordless login. The session lives in an HttpOnly cookie
+ * (a signed JWT); we hydrate it once on mount via `/api/me`, then keep it in
+ * React state across sign-in / sign-out / profile updates.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const session = authClient.useSession();
-  const sessionUser = session.data?.user ?? null;
+  const [user, setUser] = useState<ReturnType<typeof toSessionUser> | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const user = useMemo(
-    () => (sessionUser ? toSessionUser(sessionUser) : null),
-    [sessionUser]
-  );
+  useEffect(() => {
+    let active = true;
+    apiMe().then((u) => {
+      if (!active) return;
+      setUser(u ? toSessionUser(u) : null);
+      setIsLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    try {
-      const { error } = await authClient.signIn.email({ email, password });
-      if (error) {
-        // Surface the real reason (status helps diagnose prod issues:
-        // 401 = bad password, 403 = origin/BETTER_AUTH_URL, 500 = server/DB).
-        const detail = error.message || error.statusText || 'request failed';
-        return { ok: false, error: error.status ? `${detail} (${error.status})` : detail };
-      }
-      // Drop any cached data from a previous user so this session starts clean.
-      queryClient.clear();
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : 'Could not reach the server' };
-    }
+  const signIn = useCallback(async (email: string) => {
+    const result = await apiLogin(email);
+    if (!result.ok) return { ok: false, error: result.error };
+    // Drop any cached data from a previous user so this session starts clean.
+    queryClient.clear();
+    setUser(toSessionUser(result.user));
+    return { ok: true };
   }, []);
 
   const signOut = useCallback(async () => {
-    await authClient.signOut();
+    await apiLogout();
     queryClient.clear();
+    setUser(null);
   }, []);
 
-  const refresh = useCallback(() => {
-    void session.refetch();
-  }, [session]);
+  const updateName = useCallback(async (name: string) => {
+    const result = await apiUpdateName(name);
+    if (!result.ok) return { ok: false, error: result.error };
+    setUser(toSessionUser(result.user));
+    return { ok: true };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const u = await apiMe();
+    setUser(u ? toSessionUser(u) : null);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isLoading: session.isPending, signIn, signOut, refresh }),
-    [user, session.isPending, signIn, signOut, refresh]
+    () => ({ user, isLoading, signIn, signOut, updateName, refresh }),
+    [user, isLoading, signIn, signOut, updateName, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

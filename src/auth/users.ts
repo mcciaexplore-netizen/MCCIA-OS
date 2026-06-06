@@ -1,13 +1,13 @@
 /**
- * Display roster for the login picker and avatars.
+ * Display roster for the login screen and avatars.
  *
- * Authentication itself lives in Neon (Better Auth) — this file only maps each
- * account's email to a friendly name, emoji, and role for the UI, since Better
- * Auth has no emoji field. Keep the emails in sync with the accounts in the
- * database (created via Better Auth; see the four seed users).
+ * Authentication itself lives in Neon (the `neon_auth."user"` table) — this file
+ * only maps each account's email to a friendly name, emoji, and role for the UI,
+ * since the database has no emoji field. Keep the emails in sync with the rows in
+ * the database (see the four seed users).
  */
 
-/** The signed-in user as the app consumes it (Better Auth user + cosmetics). */
+/** The signed-in user as the app consumes it (DB user + cosmetics). */
 export interface SessionUser {
   id: string;
   name: string;
@@ -43,7 +43,7 @@ export function profileFor(email: string | null | undefined): Profile | undefine
   return PROFILES.find((p) => p.email.toLowerCase() === lower);
 }
 
-/** Map a Better Auth user to the app's SessionUser, layering on the cosmetics. */
+/** Map a database user to the app's SessionUser, layering on the cosmetics. */
 export function toSessionUser(user: {
   id: string;
   name?: string | null;
