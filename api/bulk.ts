@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { handleBulk } from '../server/api';
+import { handleBulk } from '../server/api.js';
 
 /** Atomic multi-sheet replace (bulk import). See server/api.ts. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {

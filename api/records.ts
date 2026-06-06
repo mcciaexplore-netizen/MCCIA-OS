@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { handleRecords } from '../server/api';
+import { handleRecords } from '../server/api.js';
 
 /** GET/POST/PATCH/DELETE a single sheet's records. See server/api.ts. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {

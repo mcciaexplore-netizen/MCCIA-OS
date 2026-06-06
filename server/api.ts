@@ -18,8 +18,8 @@ import {
   removeRow,
   updateRow,
   type Sheet,
-} from './store';
-import { getAuth } from './auth';
+} from './store.js';
+import { getAuth } from './auth.js';
 
 export interface ApiRequest {
   method: string;

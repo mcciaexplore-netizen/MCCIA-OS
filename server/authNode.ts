@@ -10,7 +10,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getAuth } from './auth';
+import { getAuth } from './auth.js';
 
 interface NodeReqLike extends IncomingMessage {
   body?: unknown;
