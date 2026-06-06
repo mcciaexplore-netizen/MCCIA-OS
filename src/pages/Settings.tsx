@@ -5,7 +5,6 @@ import {
   Database,
   Download,
   FileSpreadsheet,
-  KeyRound,
   Monitor,
   Moon,
   Sun,
@@ -66,7 +65,7 @@ export function Settings() {
 }
 
 /* ------------------------------------------------------------------ *
- * Account — display name + password (auth backed by Neon / Better Auth)
+ * Account — display name (profile)
  * ------------------------------------------------------------------ */
 
 function AccountCard() {
@@ -74,11 +73,6 @@ function AccountCard() {
 
   const [name, setName] = useState(user?.name ?? '');
   const [savingName, setSavingName] = useState(false);
-
-  const [curPw, setCurPw] = useState('');
-  const [newPw, setNewPw] = useState('');
-  const [confirmPw, setConfirmPw] = useState('');
-  const [changingPw, setChangingPw] = useState(false);
 
   if (!user) return null;
 
@@ -99,29 +93,8 @@ function AccountCard() {
     toast.success('Profile updated');
   };
 
-  const changePassword = async () => {
-    if (newPw.length < 6) return toast.error('New password must be at least 6 characters.');
-    if (newPw !== confirmPw) return toast.error('New passwords do not match.');
-    setChangingPw(true);
-    const { error } = await authClient.changePassword({
-      currentPassword: curPw,
-      newPassword: newPw,
-      revokeOtherSessions: true,
-    });
-    setChangingPw(false);
-    if (error) {
-      toast.error(error.message || 'Could not change password — check your current password.');
-      return;
-    }
-    setCurPw('');
-    setNewPw('');
-    setConfirmPw('');
-    toast.success('Password changed');
-  };
-
   return (
-    <SectionCard icon={UserCog} title="Account" description="Your display name and password.">
-      {/* Profile */}
+    <SectionCard icon={UserCog} title="Account" description="Your profile.">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[4rem,1fr,auto] sm:items-end">
         <div className="flex flex-col">
           <span className="mb-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">Avatar</span>
@@ -137,30 +110,6 @@ function AccountCard() {
         </Button>
       </div>
       <p className="mt-2 text-xs text-slate-400">Signed in as {user.email}</p>
-
-      <hr className="my-4 border-slate-100 dark:border-slate-800" />
-
-      {/* Change password */}
-      <p className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
-        <KeyRound className="h-4 w-4 text-slate-400" aria-hidden />
-        Change password
-      </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <FormField label="Current password" htmlFor="acc-cur">
-          <TextInput id="acc-cur" type="password" autoComplete="current-password" value={curPw} onChange={(e) => setCurPw(e.target.value)} />
-        </FormField>
-        <FormField label="New password" htmlFor="acc-new">
-          <TextInput id="acc-new" type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
-        </FormField>
-        <FormField label="Confirm new" htmlFor="acc-confirm">
-          <TextInput id="acc-confirm" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} />
-        </FormField>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <Button variant="secondary" onClick={changePassword} loading={changingPw} disabled={!curPw || !newPw || !confirmPw}>
-          Update password
-        </Button>
-      </div>
     </SectionCard>
   );
 }

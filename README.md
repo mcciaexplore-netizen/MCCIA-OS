@@ -20,7 +20,7 @@ A personal workspace for an AI intern at MCCIA to manage **consulting engagement
 - **Command palette** (`⌘K` / `Ctrl+K` or `/`) — search across companies, sessions, and projects and jump to any result.
 - **Keyboard shortcuts** — `N` = new entry (context-aware per page), `/` = search, `D` = dashboard.
 - **Notification bell** — count of overdue items, with a dropdown to jump to each.
-- **Authentication** — a profile picker + password backed by [Better Auth](https://better-auth.com) with sessions in Neon. Every data API call requires a valid session.
+- **Profile sign-in** — a passwordless profile picker backed by [Better Auth](https://better-auth.com) with sessions in Neon; each user gets their own private data.
 - **Bulk Excel import / export** — import consultations from an Excel/CSV file, pasted cells, or a public Google Sheets link; export everything back to `.xlsx`.
 - **Settings** — preferences (default follow-up interval, theme, timezone) and data management (Excel import/export, export all data as JSON, clear cache).
 - **Resilient UX** — optimistic updates with rollback, per-route error boundaries, loading skeletons, and empty/error states everywhere.
@@ -87,8 +87,10 @@ and forms are storage-agnostic.
 
 ## Authentication
 
-Real authentication via [Better Auth](https://better-auth.com): email + password,
-with users and sessions stored in Neon (the `neon_auth` schema). The flow:
+Sessions are managed by [Better Auth](https://better-auth.com) with users and
+sessions stored in Neon (the `neon_auth` schema). The login is a **profile picker
+with no password** — tapping a profile signs straight in as that user, and the
+data API still identifies each user by their session for per-user data.
 
 - `server/auth.ts` builds the Better Auth instance (pg pool → Neon `neon_auth`).
 - `api/auth/[...all].ts` (and the Vite dev middleware) serve `/api/auth/*`.
@@ -96,15 +98,11 @@ with users and sessions stored in Neon (the `neon_auth` schema). The flow:
   exposes the session to the app, and `<App>` gates every route behind it.
 - The data API authorizes each request via the session cookie (see `server/api.ts`).
 
-Manage accounts in the database; signed-in users change their own password in
-**Settings → Account**. The login picker's display profiles live in
-[`src/auth/users.ts`](src/auth/users.ts).
-
-**Forgot password:** no email provider is wired, so the login's "Forgot password"
-flow (`POST /api/reset`, [`server/api.ts`](server/api.ts)) gates on a shared
-recovery code (`RESET_CODE`, default `mccia-recovery-2026`) — enter the code and a
-new password to reset. Anyone with the code can reset any account, so set a
-private `RESET_CODE` in production.
+> **No authentication boundary:** the profile picker has no password, so anyone
+> who can open the app can sign in as any profile. Each user's data stays
+> separate, but it isn't protected. To require real auth, re-enable password
+> sign-in in [`src/pages/Login.tsx`](src/pages/Login.tsx). The login picker's
+> display profiles live in [`src/auth/users.ts`](src/auth/users.ts).
 
 ## Deployment
 
@@ -117,7 +115,6 @@ Environment Variables) before deploying:
 | `DATABASE_URL` | Neon connection string (secret). |
 | `BETTER_AUTH_SECRET` | Long random string that signs sessions (`openssl rand -base64 32`). Keep stable + secret. |
 | `BETTER_AUTH_URL` | The **exact deployed origin** (e.g. `https://your-app.vercel.app`) — Better Auth checks request origins against it. |
-| `RESET_CODE` | Optional. Shared recovery code for "Forgot password" (defaults to `mccia-recovery-2026`). |
 
 ```bash
 npm run build      # type-checks and outputs the SPA to dist/
