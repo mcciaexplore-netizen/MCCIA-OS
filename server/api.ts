@@ -9,6 +9,8 @@
  * session cookie automatically on same-origin calls). No session → 401.
  */
 
+import { neon } from '@neondatabase/serverless';
+import { hashPassword } from 'better-auth/crypto';
 import {
   appendRow,
   ensureSchemaOnce,
@@ -107,6 +109,43 @@ export async function handleBulk(req: ApiRequest): Promise<ApiResponse> {
   try {
     await ensureSchemaOnce();
     await overwriteMany(ownerId, cleaned);
+    return ok({ ok: true });
+  } catch (error) {
+    return fail(500, error instanceof Error ? error.message : 'Server error');
+  }
+}
+
+/**
+ * "Forgot password" reset — `POST /api/reset` with `{ email, code, newPassword }`.
+ *
+ * No email provider is configured, so this gates on a shared recovery code
+ * (`RESET_CODE`, default `mccia-recovery-2026`) instead of an emailed link: enter
+ * the code + a new password and the account's password is reset. This is the
+ * same "casual gate" tier as the rest of the app — anyone with the code can reset
+ * any account, so set a private `RESET_CODE` in production.
+ */
+export async function handlePasswordReset(req: ApiRequest): Promise<ApiResponse> {
+  if (req.method !== 'POST') return fail(405, `Method ${req.method} not allowed`);
+
+  const body = asRecord(req.body);
+  const email = (typeof body.email === 'string' ? body.email : '').trim().toLowerCase();
+  const code = typeof body.code === 'string' ? body.code : '';
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+
+  if (!code || code !== (process.env.RESET_CODE || 'mccia-recovery-2026')) {
+    return fail(401, 'Incorrect recovery code.');
+  }
+  if (!email) return fail(400, 'Email is required.');
+  if (newPassword.length < 6) return fail(400, 'New password must be at least 6 characters.');
+
+  try {
+    const sql = neon(process.env.DATABASE_URL ?? '');
+    const rows = (await sql`
+      select id from neon_auth."user" where lower(email) = ${email}`) as { id: string }[];
+    if (!rows.length) return fail(404, 'No account with that email.');
+
+    const ctx = await getAuth().$context;
+    await ctx.internalAdapter.updatePassword(rows[0].id, await hashPassword(newPassword));
     return ok({ ok: true });
   } catch (error) {
     return fail(500, error instanceof Error ? error.message : 'Server error');

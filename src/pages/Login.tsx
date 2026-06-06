@@ -1,44 +1,62 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, Lock, LogIn, Sparkles } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, KeyRound, Lock, LogIn, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { APP_NAME, APP_TAGLINE } from '@/constants';
 import { useAuth } from '@/auth/useAuth';
 import { PROFILES, type Profile } from '@/auth/users';
 import { cn } from '@/utils/cn';
 
+type Step = 'password' | 'forgot';
+
 /**
  * Profile-picker sign-in: tap your avatar, enter your password. Authentication
  * runs server-side against Neon (Better Auth) — each profile maps to an account
- * email under the hood.
+ * email under the hood. "Forgot password" resets via a shared recovery code (no
+ * email provider configured); see `server/api.ts` → `handlePasswordReset`.
  */
 export function Login() {
   const { signIn } = useAuth();
   const single = PROFILES.length === 1 ? PROFILES[0] : null;
 
   const [selected, setSelected] = useState<Profile | null>(single);
-  const [password, setPassword] = useState('');
-  const [show, setShow] = useState(false);
+  const [step, setStep] = useState<Step>('password');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
+
+  // Password step
+  const [password, setPassword] = useState('');
   const passwordRef = useRef<HTMLInputElement>(null);
 
+  // Forgot step
+  const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+
   useEffect(() => {
-    if (selected) passwordRef.current?.focus();
-  }, [selected]);
+    if (selected && step === 'password') passwordRef.current?.focus();
+  }, [selected, step]);
+
+  function resetFields() {
+    setStep('password');
+    setPassword('');
+    setCode('');
+    setNewPassword('');
+    setConfirm('');
+    setError(null);
+  }
 
   const pick = (profile: Profile) => {
     setSelected(profile);
-    setPassword('');
-    setError(null);
+    resetFields();
   };
 
   const back = () => {
     setSelected(null);
-    setPassword('');
-    setError(null);
+    resetFields();
   };
 
-  const submit = async (e: React.FormEvent) => {
+  const submitPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected || busy) return;
     setBusy(true);
@@ -50,6 +68,38 @@ export function Login() {
       passwordRef.current?.select();
     }
     // On success, the session updates and <App> swaps in the workspace.
+  };
+
+  const submitForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected || busy) return;
+    if (newPassword.length < 6) return setError('New password must be at least 6 characters.');
+    if (newPassword !== confirm) return setError('New passwords do not match.');
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/reset', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: selected.email, code, newPassword }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not reset your password.');
+        setBusy(false);
+        return;
+      }
+    } catch {
+      setError('Could not reach the server — try again.');
+      setBusy(false);
+      return;
+    }
+    // Reset succeeded → sign straight in with the new password.
+    const { ok, error: message } = await signIn(selected.email, newPassword);
+    if (!ok) {
+      setError(message ?? 'Password reset, but sign-in failed — try signing in.');
+      setBusy(false);
+    }
   };
 
   return (
@@ -71,14 +121,14 @@ export function Login() {
             <ProfilePicker profiles={PROFILES} onPick={pick} />
           ) : (
             <div className="flex flex-col items-center">
-              {!single && (
+              {(!single || step === 'forgot') && (
                 <button
                   type="button"
-                  onClick={back}
+                  onClick={() => (step === 'forgot' ? resetFields() : back())}
                   className="mb-4 inline-flex items-center gap-1.5 self-start text-sm font-medium text-slate-500 transition-colors hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
                 >
                   <ArrowLeft className="h-4 w-4" aria-hidden />
-                  Choose a different profile
+                  {step === 'forgot' ? 'Back to sign in' : 'Choose a different profile'}
                 </button>
               )}
 
@@ -90,26 +140,85 @@ export function Login() {
               </h2>
               <p className="text-sm text-slate-400">{selected.role}</p>
 
-              <form onSubmit={submit} className="mt-6 w-full max-w-xs">
-                <PasswordField
-                  inputRef={passwordRef}
-                  value={password}
-                  onChange={(v) => {
-                    setPassword(v);
-                    if (error) setError(null);
-                  }}
-                  show={show}
-                  onToggleShow={() => setShow((s) => !s)}
-                  invalid={!!error}
-                />
-                {error && (
-                  <p className="mt-2 text-center text-sm text-rose-600 dark:text-rose-400">{error}</p>
-                )}
-                <Button type="submit" className="mt-4 w-full" loading={busy} disabled={!password}>
-                  <LogIn className="h-4 w-4" />
-                  Sign in
-                </Button>
-              </form>
+              {step === 'password' ? (
+                <form onSubmit={submitPassword} className="mt-6 w-full max-w-xs">
+                  <PasswordField
+                    inputRef={passwordRef}
+                    id="password"
+                    label="Password"
+                    value={password}
+                    onChange={(v) => {
+                      setPassword(v);
+                      if (error) setError(null);
+                    }}
+                    show={show}
+                    onToggleShow={() => setShow((s) => !s)}
+                    invalid={!!error}
+                    autoComplete="current-password"
+                  />
+                  {error && <ErrorText>{error}</ErrorText>}
+                  <Button type="submit" className="mt-4 w-full" loading={busy} disabled={!password}>
+                    <LogIn className="h-4 w-4" />
+                    Sign in
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetFields();
+                      setStep('forgot');
+                    }}
+                    className="mt-3 block w-full text-center text-xs font-medium text-slate-500 transition-colors hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-300"
+                  >
+                    Forgot password?
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={submitForgot} className="mt-6 w-full max-w-xs space-y-3">
+                  <div className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/50 dark:text-slate-400">
+                    <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    Enter the recovery code and choose a new password.
+                  </div>
+                  <PasswordField
+                    id="code"
+                    label="Recovery code"
+                    value={code}
+                    onChange={(v) => {
+                      setCode(v);
+                      if (error) setError(null);
+                    }}
+                    show={show}
+                    onToggleShow={() => setShow((s) => !s)}
+                    autoComplete="off"
+                  />
+                  <PasswordField
+                    id="newPassword"
+                    label="New password"
+                    value={newPassword}
+                    onChange={setNewPassword}
+                    show={show}
+                    onToggleShow={() => setShow((s) => !s)}
+                    autoComplete="new-password"
+                  />
+                  <PasswordField
+                    id="confirm"
+                    label="Confirm new password"
+                    value={confirm}
+                    onChange={setConfirm}
+                    show={show}
+                    onToggleShow={() => setShow((s) => !s)}
+                    autoComplete="new-password"
+                  />
+                  {error && <ErrorText>{error}</ErrorText>}
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    loading={busy}
+                    disabled={!code || !newPassword || !confirm}
+                  >
+                    Reset &amp; sign in
+                  </Button>
+                </form>
+              )}
             </div>
           )}
         </div>
@@ -162,24 +271,30 @@ function ProfilePicker({
 }
 
 function PasswordField({
+  id,
+  label,
   value,
   onChange,
   show,
   onToggleShow,
   invalid,
+  autoComplete,
   inputRef,
 }: {
+  id: string;
+  label: string;
   value: string;
   onChange: (value: string) => void;
   show: boolean;
   onToggleShow: () => void;
   invalid?: boolean;
+  autoComplete?: string;
   inputRef?: React.RefObject<HTMLInputElement>;
 }) {
   return (
     <div>
-      <label htmlFor="password" className="sr-only">
-        Password
+      <label htmlFor={id} className="sr-only">
+        {label}
       </label>
       <div className="relative">
         <Lock
@@ -188,12 +303,12 @@ function PasswordField({
         />
         <input
           ref={inputRef}
-          id="password"
+          id={id}
           type={show ? 'text' : 'password'}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Password"
-          autoComplete="current-password"
+          placeholder={label}
+          autoComplete={autoComplete}
           aria-invalid={invalid}
           className={cn(
             'h-11 w-full rounded-lg border bg-white px-10 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:ring-2 dark:bg-slate-800 dark:text-slate-100',
@@ -213,4 +328,8 @@ function PasswordField({
       </div>
     </div>
   );
+}
+
+function ErrorText({ children }: { children: React.ReactNode }) {
+  return <p className="mt-2 text-center text-sm text-rose-600 dark:text-rose-400">{children}</p>;
 }

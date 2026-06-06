@@ -100,6 +100,12 @@ Manage accounts in the database; signed-in users change their own password in
 **Settings → Account**. The login picker's display profiles live in
 [`src/auth/users.ts`](src/auth/users.ts).
 
+**Forgot password:** no email provider is wired, so the login's "Forgot password"
+flow (`POST /api/reset`, [`server/api.ts`](server/api.ts)) gates on a shared
+recovery code (`RESET_CODE`, default `mccia-recovery-2026`) — enter the code and a
+new password to reset. Anyone with the code can reset any account, so set a
+private `RESET_CODE` in production.
+
 ## Deployment
 
 The app deploys to **Vercel** as a static SPA plus the serverless functions in
@@ -111,6 +117,7 @@ Environment Variables) before deploying:
 | `DATABASE_URL` | Neon connection string (secret). |
 | `BETTER_AUTH_SECRET` | Long random string that signs sessions (`openssl rand -base64 32`). Keep stable + secret. |
 | `BETTER_AUTH_URL` | The **exact deployed origin** (e.g. `https://your-app.vercel.app`) — Better Auth checks request origins against it. |
+| `RESET_CODE` | Optional. Shared recovery code for "Forgot password" (defaults to `mccia-recovery-2026`). |
 
 ```bash
 npm run build      # type-checks and outputs the SPA to dist/

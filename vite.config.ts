@@ -2,7 +2,7 @@ import { defineConfig, loadEnv, type PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { handleBulk, handleRecords, type ApiRequest } from './server/api';
+import { handleBulk, handlePasswordReset, handleRecords, type ApiRequest } from './server/api';
 import { handleAuthNode } from './server/authNode';
 
 // https://vite.dev/config/
@@ -44,7 +44,9 @@ function neonApiDevPlugin(): PluginOption {
             ? handleRecords
             : parsed.pathname === '/api/bulk'
               ? handleBulk
-              : null;
+              : parsed.pathname === '/api/reset'
+                ? handlePasswordReset
+                : null;
         if (!route) return next();
 
         let body: unknown;
