@@ -18,11 +18,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await authClient.signIn.email({ email, password });
-    if (error) return { ok: false, error: error.message || 'Sign in failed' };
-    // Drop any cached data from a previous user so this session starts clean.
-    queryClient.clear();
-    return { ok: true };
+    try {
+      const { error } = await authClient.signIn.email({ email, password });
+      if (error) {
+        // Surface the real reason (status helps diagnose prod issues:
+        // 401 = bad password, 403 = origin/BETTER_AUTH_URL, 500 = server/DB).
+        const detail = error.message || error.statusText || 'request failed';
+        return { ok: false, error: error.status ? `${detail} (${error.status})` : detail };
+      }
+      // Drop any cached data from a previous user so this session starts clean.
+      queryClient.clear();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Could not reach the server' };
+    }
   }, []);
 
   const signOut = useCallback(async () => {
