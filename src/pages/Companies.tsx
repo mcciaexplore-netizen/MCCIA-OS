@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Building2, Plus, Search } from 'lucide-react';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import { Building2, Download, Plus, Search, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -9,9 +10,16 @@ import { CompanyCard } from '@/components/companies/CompanyCard';
 import { CompanyDrawer } from '@/components/CompanyDrawer';
 import { useRegisterNewAction } from '@/components/command/useAppCommand';
 import { useCompaniesWithStats } from '@/hooks/useCompaniesWithStats';
-import { COMPANY_STATUS_LABELS } from '@/constants';
-import type { CompanyStatus } from '@/types';
+import { sheets } from '@/api/sheets';
+import { COMPANY_STATUS_LABELS, SHEET_NAMES } from '@/constants';
+import type { Company, CompanyStatus } from '@/types';
+import { errorMessage } from '@/hooks/mutationUtils';
 import { cn } from '@/utils/cn';
+
+// SheetJS-heavy drawer: loaded on demand so it stays out of the Companies chunk.
+const CompanyImportDrawer = lazy(() =>
+  import('@/components/CompanyImportDrawer').then((m) => ({ default: m.CompanyImportDrawer }))
+);
 
 type StatusFilter = 'all' | CompanyStatus;
 
@@ -28,9 +36,35 @@ export function Companies() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
+  // Import / export.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importLoaded, setImportLoaded] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   const companies = data ?? [];
 
   useRegisterNewAction('company', () => setDrawerOpen(true));
+
+  const openImport = () => {
+    setImportLoaded(true);
+    setImportOpen(true);
+  };
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const [{ exportCompaniesToXlsx }, allCompanies] = await Promise.all([
+        import('@/utils/companyIO'),
+        sheets.read<Company>(SHEET_NAMES.companies),
+      ]);
+      exportCompaniesToXlsx(allCompanies);
+      toast.success('Excel workbook downloaded');
+    } catch (e) {
+      toast.error(errorMessage(e, 'Could not export to Excel'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -50,10 +84,20 @@ export function Companies() {
         title="Companies"
         description="The master record for every client MCCIA works with."
         actions={
-          <Button size="sm" onClick={() => setDrawerOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Add company
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={openImport}>
+              <Upload className="h-4 w-4" />
+              Import
+            </Button>
+            <Button size="sm" variant="secondary" onClick={exportExcel} loading={exporting}>
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
+            <Button size="sm" onClick={() => setDrawerOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add company
+            </Button>
+          </div>
         }
       />
 
@@ -105,12 +149,18 @@ export function Companies() {
         <EmptyState
           icon={Building2}
           title="No companies yet"
-          description="Add your first client to start tracking sessions, projects, and creatives."
+          description="Add your first client, or import your whole list from Excel to get going fast."
           action={
-            <Button onClick={() => setDrawerOpen(true)}>
-              <Plus className="h-4 w-4" />
-              Add your first company
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button onClick={() => setDrawerOpen(true)}>
+                <Plus className="h-4 w-4" />
+                Add your first company
+              </Button>
+              <Button variant="secondary" onClick={openImport}>
+                <Upload className="h-4 w-4" />
+                Import from Excel
+              </Button>
+            </div>
           }
         />
       ) : filtered.length === 0 ? (
@@ -128,6 +178,12 @@ export function Companies() {
       )}
 
       <CompanyDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+
+      {importLoaded && (
+        <Suspense fallback={null}>
+          <CompanyImportDrawer open={importOpen} onClose={() => setImportOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

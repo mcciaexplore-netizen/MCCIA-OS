@@ -40,6 +40,8 @@ export interface ImportKind<Row> {
   downloadTemplate: () => void;
   /** Read-fresh → plan → atomic write. Returns counts for the toast. */
   runImport: (rows: Row[]) => Promise<{ records: number; companies: number }>;
+  /** Optional custom success toast; defaults to "Imported N nouns across M companies." */
+  successMessage?: (result: { records: number; companies: number }) => string;
 }
 
 type SourceMode = 'file' | 'paste' | 'link';
@@ -132,8 +134,12 @@ export function ImportDrawer<Row>({ open, onClose, kind }: ImportDrawerProps<Row
     if (!parsed || parsed.rows.length === 0) return;
     setImporting(true);
     try {
-      const { records, companies } = await kind.runImport(parsed.rows);
-      toast.success(`Imported ${plural(records, kind.recordNoun)} across ${companyWord(companies)}.`);
+      const result = await kind.runImport(parsed.rows);
+      toast.success(
+        kind.successMessage
+          ? kind.successMessage(result)
+          : `Imported ${plural(result.records, kind.recordNoun)} across ${companyWord(result.companies)}.`
+      );
       onClose();
     } catch (e) {
       toast.error(errorMessage(e, 'Import failed — no changes were made.'));
