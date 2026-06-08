@@ -30,9 +30,9 @@ A personal workspace for an AI intern at MCCIA to manage **consulting engagement
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in DATABASE_URL + AUTH_SECRET (see below)
-npm run db:setup             # create the users + records tables (run once)
-#                              then run supabase/seed.sql to create the accounts
+cp .env.example .env.local   # fill in SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + AUTH_SECRET
+# create the schema: in the Supabase SQL editor, run supabase/schema.sql
+# then supabase/seed.sql (creates the user accounts)
 npm run dev                  # http://localhost:5173
 ```
 
@@ -47,7 +47,6 @@ in with one of the seeded accounts (e.g. `sujal@mcciapune.com`).
 | Script | Description |
 | --- | --- |
 | `npm run dev` | Start the Vite dev server (with the local data API) |
-| `npm run db:setup` | Create the Supabase schema (idempotent; reads `.env.local`) |
 | `npm run build` | Type-check (`tsc -b`) and build for production |
 | `npm run preview` | Preview the production build locally |
 | `npm run typecheck` | Run `tsc --noEmit` |
@@ -81,8 +80,9 @@ and forms are storage-agnostic.
   client can't read or write another user's data.
 - **Atomic bulk import:** `overwriteMany` replaces the current user's rows for a
   sheet inside a single transaction — all-or-nothing, never a half-written batch.
-- **Credentials stay server-side:** `DATABASE_URL` and `AUTH_SECRET` are only read
-  by the functions and the dev middleware; never bundled into the client.
+- **Credentials stay server-side:** `SUPABASE_SERVICE_ROLE_KEY` and `AUTH_SECRET`
+  are only read by the functions and the dev middleware; never bundled into the
+  client. (The service role key bypasses RLS, so it must never reach the browser.)
 - **Server-side auth:** every `/api/records` and `/api/bulk` call verifies the
   session token in the cookie (the browser sends it automatically); no valid
   token → `401`.
@@ -117,7 +117,8 @@ Environment Variables) before deploying:
 
 | Variable | Notes |
 | --- | --- |
-| `DATABASE_URL` | Supabase Postgres connection string — the "Connection pooling" URI, Transaction mode, port 6543 (secret). |
+| `SUPABASE_URL` | Your Supabase project URL (`https://<ref>.supabase.co`). |
+| `SUPABASE_SERVICE_ROLE_KEY` | The secret service-role key (Supabase → Settings → API). Bypasses RLS — keep secret, server-only. |
 | `AUTH_SECRET` | Long random string that signs the session token (`openssl rand -base64 32`). Keep stable + secret. (`BETTER_AUTH_SECRET` is still accepted as a fallback.) |
 
 ```bash
@@ -128,15 +129,14 @@ npm run build      # type-checks and outputs the SPA to dist/
 The `/api/*` functions take precedence over the catch-all rewrite, so the
 database API and client routing coexist. Create the schema once against the
 Supabase database — run `supabase/schema.sql` then `supabase/seed.sql` in the
-Supabase SQL editor (or `npm run db:setup` for the schema).
+Supabase SQL editor.
 
 ## Project structure
 
 ```
 vercel.json     Build + SPA-routing config for Vercel
 api/            Vercel serverless functions: records, bulk, login, me, logout
-server/         Supabase (Postgres) client, data store, API handlers, sessions
-scripts/        db:setup (schema bootstrap)
+server/         Supabase client (service role), data store, API handlers, sessions
 supabase/       schema.sql + seed.sql (run in the Supabase SQL editor)
 src/
   api/          Remote data store (calls /api) + query keys

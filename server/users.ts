@@ -1,15 +1,18 @@
 /**
- * User lookups for the passwordless login, backed by Supabase (Postgres).
+ * User lookups for the passwordless login, backed by Supabase.
  *
- * Reads the `users` table — id, email, name, role. There is no password; login
- * simply checks that an email exists and issues a session token (see
- * `server/session.ts`). We manage this table ourselves (created by `ensureSchema`
- * in store.ts / supabase/schema.sql), separate from Supabase Auth.
+ * Reads the `users` table — id, email, name, role — through the service-role
+ * client (see db.ts). There is no password; login simply checks that an email
+ * exists and issues a session token (see server/session.ts). We manage this
+ * table ourselves (supabase/schema.sql / seed.sql), separate from Supabase Auth.
  *
- * Runs server-side only; `DATABASE_URL` never reaches the browser.
+ * Emails are stored lower-case (see seed.sql), and we lower-case the input here,
+ * so matching is effectively case-insensitive.
+ *
+ * Runs server-side only; the service role key never reaches the browser.
  */
 
-import { sql } from './db.js';
+import { supabase } from './db.js';
 
 /** The fields the app needs about a user. */
 export interface DbUser {
@@ -19,7 +22,9 @@ export interface DbUser {
   role: string | null;
 }
 
-function toUser(row: Record<string, unknown> | undefined): DbUser | null {
+const USER_COLUMNS = 'id, email, name, role';
+
+function toUser(row: Record<string, unknown> | null | undefined): DbUser | null {
   if (!row) return null;
   return {
     id: String(row.id),
@@ -31,30 +36,34 @@ function toUser(row: Record<string, unknown> | undefined): DbUser | null {
 
 /** Find a user by email (case-insensitive). Null if no such account exists. */
 export async function findUserByEmail(email: string): Promise<DbUser | null> {
-  const rows = await sql()`
-    select id, email, name, role
-    from users
-    where lower(email) = lower(${email})
-    limit 1`;
-  return toUser(rows[0]);
+  const { data, error } = await supabase()
+    .from('users')
+    .select(USER_COLUMNS)
+    .eq('email', email.trim().toLowerCase())
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return toUser(data);
 }
 
 /** Re-read a user by id (to reflect name/role changes and confirm existence). */
 export async function getUserById(id: string): Promise<DbUser | null> {
-  const rows = await sql()`
-    select id, email, name, role
-    from users
-    where id = ${id}::uuid
-    limit 1`;
-  return toUser(rows[0]);
+  const { data, error } = await supabase()
+    .from('users')
+    .select(USER_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return toUser(data);
 }
 
 /** Update a user's display name; returns the updated row, or null if missing. */
 export async function updateUserName(id: string, name: string): Promise<DbUser | null> {
-  const rows = await sql()`
-    update users
-    set name = ${name}, updated_at = now()
-    where id = ${id}::uuid
-    returning id, email, name, role`;
-  return toUser(rows[0]);
+  const { data, error } = await supabase()
+    .from('users')
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select(USER_COLUMNS)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return toUser(data);
 }

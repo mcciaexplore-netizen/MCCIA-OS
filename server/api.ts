@@ -11,7 +11,6 @@
 
 import {
   appendRow,
-  ensureSchemaOnce,
   isSheet,
   overwriteMany,
   readSheet,
@@ -60,7 +59,6 @@ export async function handleRecords(req: ApiRequest): Promise<ApiResponse> {
   if (!isSheet(sheet)) return fail(400, `Unknown or missing sheet "${sheet ?? ''}"`);
 
   try {
-    await ensureSchemaOnce();
     switch (req.method) {
       case 'GET':
         return ok(await readSheet(sheet, ownerId));
@@ -103,7 +101,6 @@ export async function handleBulk(req: ApiRequest): Promise<ApiResponse> {
   }
 
   try {
-    await ensureSchemaOnce();
     await overwriteMany(ownerId, cleaned);
     return ok({ ok: true });
   } catch (error) {

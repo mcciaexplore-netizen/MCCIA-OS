@@ -1,35 +1,35 @@
 /**
- * Shared Postgres client, backed by Supabase.
+ * Shared Supabase client (server-side, service role).
  *
- * Supabase is plain Postgres, so we talk to it over a standard connection
- * (postgres.js) using `DATABASE_URL`. Point that at Supabase's *pooler*
- * connection string (Project Settings → Database → "Connection pooling",
- * Transaction mode, port 6543) — the pooler is what makes this safe under
- * serverless (Vercel functions).
+ * We talk to Supabase over its HTTPS data API (`@supabase/supabase-js`) rather
+ * than a raw Postgres connection — no connection pooling, no IPv6/pooler quirks,
+ * which suits Vercel's serverless functions.
  *
- * The client is created once and reused across warm invocations. Runs only in a
- * trusted server context; `DATABASE_URL` is never exposed to the browser.
+ * This uses the SERVICE ROLE key, so it bypasses Row Level Security and has full
+ * access. That's safe because it only ever runs server-side (Vercel functions +
+ * the Vite dev middleware) and our own handlers enforce per-user scoping via
+ * `owner_id`. The service role key must NEVER reach the browser.
+ *
+ * The client is created once and reused across warm invocations.
  */
 
-import postgres from 'postgres';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-let client: ReturnType<typeof postgres> | null = null;
+let client: SupabaseClient | null = null;
 
-/** The shared postgres.js client (tagged-template SQL), created on first use. */
-export function sql(): ReturnType<typeof postgres> {
+/** The shared service-role Supabase client, created on first use. */
+export function supabase(): SupabaseClient {
   if (client) return client;
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error('DATABASE_URL is not set — point it at your Supabase Postgres connection string.');
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url) throw new Error('SUPABASE_URL is not set — your Supabase project URL (https://<ref>.supabase.co).');
+  if (!key) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is not set — the secret service-role key from Supabase → Settings → API.'
+    );
   }
-  client = postgres(url, {
-    // Supabase's transaction pooler (Supavisor) does not support prepared
-    // statements; disabling them keeps queries working through the pooler.
-    prepare: false,
-    // Supabase requires TLS.
-    ssl: 'require',
-    max: 3,
-    idle_timeout: 20,
+  client = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
   return client;
 }

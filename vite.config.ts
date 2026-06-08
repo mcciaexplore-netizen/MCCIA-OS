@@ -91,7 +91,12 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   // AUTH_SECRET signs the session token; BETTER_AUTH_SECRET is accepted as a
   // fallback so existing deployments keep working without re-keying.
-  for (const key of ['DATABASE_URL', 'AUTH_SECRET', 'BETTER_AUTH_SECRET'] as const) {
+  for (const key of [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'AUTH_SECRET',
+    'BETTER_AUTH_SECRET',
+  ] as const) {
     if (env[key] && !process.env[key]) process.env[key] = env[key];
   }
 
