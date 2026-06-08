@@ -5,7 +5,7 @@
  * `/api/me`, `/api/logout`) and the Vite dev middleware, so local dev and the
  * deployed app share identical logic.
  *
- * Login is email-only: if the email exists in `neon_auth."user"`, we mint a
+ * Login is email-only: if the email exists in the `users` table, we mint a
  * signed session cookie (no password, no OTP, no magic link). This is an
  * internal tool for trusted users — there is intentionally no auth boundary
  * beyond "the email exists".

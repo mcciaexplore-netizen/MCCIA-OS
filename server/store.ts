@@ -1,18 +1,19 @@
 /**
- * Server-side data store backed by Neon (Postgres).
+ * Server-side data store backed by Supabase (Postgres).
  *
- * This is the durable replacement for the old browser-local store: every record
- * lives in a single generic `records` table keyed by `(sheet, id)` with the row
- * itself held as `jsonb`. That mirrors the previous "one array per sheet" model
- * exactly, so the existing read / append / update / remove / overwriteMany surface
- * maps over without any per-field schema — which keeps the evolving data model
- * free to change without migrations.
+ * Every record lives in a single generic `records` table keyed by `(sheet, id)`
+ * with the row itself held as `jsonb`. That mirrors the previous "one array per
+ * sheet" model exactly, so the read / append / update / remove / overwriteMany
+ * surface maps over without any per-field schema — which keeps the evolving data
+ * model free to change without migrations.
  *
- * Runs only in a trusted server context (Vercel function or the Vite dev
- * middleware). The `DATABASE_URL` it reads is never exposed to the browser.
+ * Talks to Supabase over a standard Postgres connection (postgres.js) via the
+ * shared client in `db.ts`. Runs only in a trusted server context (Vercel
+ * function or the Vite dev middleware); `DATABASE_URL` is never exposed to the
+ * browser.
  */
 
-import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
+import { sql } from './db.js';
 import { randomUUID } from 'node:crypto';
 
 /** The five known sheets. Anything else is rejected at the API boundary. */
@@ -32,18 +33,6 @@ export function isSheet(value: unknown): value is Sheet {
 
 type Row = Record<string, unknown>;
 
-let cachedSql: NeonQueryFunction<false, false> | null = null;
-
-function sql(): NeonQueryFunction<false, false> {
-  if (cachedSql) return cachedSql;
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error('DATABASE_URL is not set — point it at the Neon connection string.');
-  }
-  cachedSql = neon(url);
-  return cachedSql;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -54,6 +43,17 @@ function nowIso(): string {
 
 export async function ensureSchema(): Promise<void> {
   const db = sql();
+  // Users for the passwordless email login (we manage this table ourselves, not
+  // Supabase Auth — login just checks the email exists). See server/users.ts.
+  await db`
+    create table if not exists users (
+      id         uuid        primary key default gen_random_uuid(),
+      email      text        not null unique,
+      name       text        not null default '',
+      role       text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )`;
   await db`
     create table if not exists records (
       sheet      text        not null,
@@ -64,9 +64,6 @@ export async function ensureSchema(): Promise<void> {
       updated_at timestamptz not null default now(),
       primary key (sheet, id)
     )`;
-  // `owner_id` scopes every record to the user who created it (added after the
-  // table first shipped, so guard with "if not exists").
-  await db`alter table records add column if not exists owner_id uuid`;
   await db`create index if not exists records_owner_sheet_idx on records (owner_id, sheet, created_at)`;
 }
 
@@ -150,19 +147,18 @@ export async function overwriteMany(
   ownerId: string,
   updates: { sheet: Sheet; rows: Row[] }[]
 ): Promise<void> {
-  const db = sql();
-  const queries: ReturnType<typeof db>[] = [];
-  for (const { sheet, rows } of updates) {
-    queries.push(db`delete from records where sheet = ${sheet} and owner_id = ${ownerId}`);
-    for (const row of rows) {
-      const id = typeof row.id === 'string' && row.id ? row.id : randomUUID();
-      const createdAt = typeof row.createdAt === 'string' && row.createdAt ? row.createdAt : nowIso();
-      const updatedAt = typeof row.updatedAt === 'string' && row.updatedAt ? row.updatedAt : createdAt;
-      const record: Row = { ...row, id, createdAt, updatedAt };
-      queries.push(db`
-        insert into records (sheet, id, owner_id, data, created_at, updated_at)
-        values (${sheet}, ${id}, ${ownerId}, ${JSON.stringify(record)}::jsonb, ${createdAt}, ${updatedAt})`);
+  await sql().begin(async (tx) => {
+    for (const { sheet, rows } of updates) {
+      await tx`delete from records where sheet = ${sheet} and owner_id = ${ownerId}`;
+      for (const row of rows) {
+        const id = typeof row.id === 'string' && row.id ? row.id : randomUUID();
+        const createdAt = typeof row.createdAt === 'string' && row.createdAt ? row.createdAt : nowIso();
+        const updatedAt = typeof row.updatedAt === 'string' && row.updatedAt ? row.updatedAt : createdAt;
+        const record: Row = { ...row, id, createdAt, updatedAt };
+        await tx`
+          insert into records (sheet, id, owner_id, data, created_at, updated_at)
+          values (${sheet}, ${id}, ${ownerId}, ${JSON.stringify(record)}::jsonb, ${createdAt}, ${updatedAt})`;
+      }
     }
-  }
-  await db.transaction(queries);
+  });
 }

@@ -3,7 +3,7 @@
  *
  * The same two functions back both the Vercel serverless functions (`/api/*.ts`)
  * and the Vite dev middleware, so local `npm run dev` and the deployed app talk
- * to Neon through identical logic.
+ * to Supabase through identical logic.
  *
  * Every request must carry a valid session cookie (the browser sends it
  * automatically on same-origin calls). No session → 401.

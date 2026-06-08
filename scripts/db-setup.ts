@@ -1,10 +1,11 @@
 /**
- * Create the Neon schema for the data backend (idempotent).
+ * Create the Supabase schema for the data backend (idempotent).
  *
  *   npm run db:setup        # reads DATABASE_URL from .env.local
  *
- * Safe to run repeatedly — it only creates the `records` table/index if missing,
- * and never touches existing rows. Run it once against a fresh database.
+ * Equivalent to running supabase/schema.sql. Safe to run repeatedly — it only
+ * creates the `users` / `records` tables + index if missing, and never touches
+ * existing rows. To create the user accounts afterwards, run supabase/seed.sql.
  */
 
 import { ensureSchema } from '../server/store';
@@ -16,7 +17,9 @@ async function main(): Promise<void> {
   }
 
   await ensureSchema();
-  console.log('✓ Schema ready: records table (+ owner_id column and indexes).');
+  console.log('✓ Schema ready: users + records tables (and indexes).');
+  console.log('  Next: run supabase/seed.sql to create the user accounts.');
+  process.exit(0);
 }
 
 main().catch((error) => {

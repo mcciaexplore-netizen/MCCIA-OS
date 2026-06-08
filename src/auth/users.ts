@@ -1,7 +1,7 @@
 /**
  * Display roster for the login screen and avatars.
  *
- * Authentication itself lives in Neon (the `neon_auth."user"` table) — this file
+ * Authentication itself lives in Supabase (the `users` table) — this file
  * only maps each account's email to a friendly name, emoji, and role for the UI,
  * since the database has no emoji field. Keep the emails in sync with the rows in
  * the database (see the four seed users).

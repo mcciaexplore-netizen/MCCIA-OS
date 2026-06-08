@@ -7,7 +7,7 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: QUERY_CONFIG.staleTime,
       gcTime: QUERY_CONFIG.gcTime,
-      // Data is shared in Neon, so refresh on focus to pick up others' edits.
+      // Data lives in Supabase, so refresh on focus to pick up the latest.
       refetchOnWindowFocus: true,
       retry: (failureCount) => failureCount < QUERY_CONFIG.retry,
     },

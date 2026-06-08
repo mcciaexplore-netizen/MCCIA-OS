@@ -1,10 +1,10 @@
 /**
- * Remote data store (Neon/Postgres via the `/api` backend).
+ * Remote data store (Supabase/Postgres via the `/api` backend).
  *
- * Records live in a shared Neon database, so what anyone enters is durable and
- * visible to every signed-in user on any device. This talks to same-origin
- * serverless functions (`/api/records`, `/api/bulk`) — the database credentials
- * stay on the server and never reach the browser.
+ * Records live in a Supabase database, scoped per signed-in user (owner_id), so
+ * each user's data is durable and follows them across devices. This talks to
+ * same-origin serverless functions (`/api/records`, `/api/bulk`) — the database
+ * credentials stay on the server and never reach the browser.
  *
  * The surface (`read / append / update / remove / overwriteMany`) is unchanged
  * from the previous local store, so the data hooks are untouched. `id` and

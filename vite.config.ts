@@ -18,13 +18,13 @@ function readRawBody(req: IncomingMessage): Promise<string> {
 }
 
 /**
- * Serve the Neon-backed data API and the passwordless auth routes during
+ * Serve the Supabase-backed data API and the passwordless auth routes during
  * `vite dev`, mirroring the Vercel functions in `/api` so `npm run dev` behaves
  * like the deployed app (same database, same auth).
  */
-function neonApiDevPlugin(): PluginOption {
+function dataApiDevPlugin(): PluginOption {
   return {
-    name: 'neon-api-dev',
+    name: 'data-api-dev',
     configureServer(server) {
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next) => {
         const url = req.url ?? '';
@@ -96,7 +96,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), neonApiDevPlugin()],
+    plugins: [react(), dataApiDevPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
