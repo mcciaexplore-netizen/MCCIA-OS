@@ -53,62 +53,63 @@ function serverError(error: unknown): AuthResult {
 
 /** POST /api/login — `{ email }` → set session cookie if the email exists. */
 export async function handleLogin(req: AuthRequest): Promise<AuthResult> {
-  if (req.method !== 'POST') return { status: 405, body: { error: `Method ${req.method} not allowed` } };
-
-  const email = String(asRecord(req.body).email ?? '').trim();
-  if (!email) return { status: 400, body: { error: 'Email is required' } };
-
-  let user: DbUser | null;
   try {
-    user = await findUserByEmail(email);
+    if (req.method !== 'POST') return { status: 405, body: { error: `Method ${req.method} not allowed` } };
+
+    const email = String(asRecord(req.body).email ?? '').trim();
+    if (!email) return { status: 400, body: { error: 'Email is required' } };
+
+    const user = await findUserByEmail(email);
+    if (!user) return { status: 401, body: { error: "We couldn't find an account for that email." } };
+
+    return { status: 200, body: { user: publicUser(user) }, setCookie: sessionCookie(signToken(claims(user))) };
   } catch (error) {
     return serverError(error);
   }
-  if (!user) return { status: 401, body: { error: "We couldn't find an account for that email." } };
-
-  return { status: 200, body: { user: publicUser(user) }, setCookie: sessionCookie(signToken(claims(user))) };
 }
 
 /** GET /api/me — the current user (re-read from the DB), or `{ user: null }`. */
 export async function handleMe(req: AuthRequest): Promise<AuthResult> {
-  const payload = verifyToken(readCookie(req.cookie, SESSION_COOKIE));
-  if (!payload) return { status: 200, body: { user: null } };
-
-  let user: DbUser | null;
   try {
-    user = await getUserById(payload.sub);
+    const payload = verifyToken(readCookie(req.cookie, SESSION_COOKIE));
+    if (!payload) return { status: 200, body: { user: null } };
+
+    const user = await getUserById(payload.sub);
+    // The token is valid but the user is gone — clear the stale cookie.
+    if (!user) return { status: 200, body: { user: null }, setCookie: clearSessionCookie() };
+
+    return { status: 200, body: { user: publicUser(user) } };
   } catch (error) {
     return serverError(error);
   }
-  // The token is valid but the user is gone — clear the stale cookie.
-  if (!user) return { status: 200, body: { user: null }, setCookie: clearSessionCookie() };
-
-  return { status: 200, body: { user: publicUser(user) } };
 }
 
 /** POST /api/logout — clear the session cookie. */
 export async function handleLogout(): Promise<AuthResult> {
-  return { status: 200, body: { ok: true }, setCookie: clearSessionCookie() };
+  try {
+    return { status: 200, body: { ok: true }, setCookie: clearSessionCookie() };
+  } catch (error) {
+    return serverError(error);
+  }
 }
 
 /** PATCH /api/me — `{ name }` → update the signed-in user's display name. */
 export async function handleUpdateProfile(req: AuthRequest): Promise<AuthResult> {
-  const payload = verifyToken(readCookie(req.cookie, SESSION_COOKIE));
-  if (!payload) return { status: 401, body: { error: 'Sign in required' } };
-
-  const name = String(asRecord(req.body).name ?? '').trim();
-  if (!name) return { status: 400, body: { error: 'Name is required' } };
-
-  let user: DbUser | null;
   try {
-    user = await updateUserName(payload.sub, name);
+    const payload = verifyToken(readCookie(req.cookie, SESSION_COOKIE));
+    if (!payload) return { status: 401, body: { error: 'Sign in required' } };
+
+    const name = String(asRecord(req.body).name ?? '').trim();
+    if (!name) return { status: 400, body: { error: 'Name is required' } };
+
+    const user = await updateUserName(payload.sub, name);
+    if (!user) return { status: 404, body: { error: 'User not found' } };
+
+    // Re-issue the cookie so the name embedded in the token stays in sync.
+    return { status: 200, body: { user: publicUser(user) }, setCookie: sessionCookie(signToken(claims(user))) };
   } catch (error) {
     return serverError(error);
   }
-  if (!user) return { status: 404, body: { error: 'User not found' } };
-
-  // Re-issue the cookie so the name embedded in the token stays in sync.
-  return { status: 200, body: { user: publicUser(user) }, setCookie: sessionCookie(signToken(claims(user))) };
 }
 
 /**
