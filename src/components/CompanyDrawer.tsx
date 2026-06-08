@@ -3,9 +3,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteButton } from '@/components/ui/ConfirmDeleteButton';
 import { FormField, SelectInput, TextInput } from '@/components/form/fields';
 import { COMPANY_STATUS_OPTIONS, INDUSTRY_OPTIONS } from '@/constants';
-import { useCreateCompany, useUpdateCompany } from '@/hooks/useCompanies';
+import { useCreateCompany, useDeleteCompany, useUpdateCompany } from '@/hooks/useCompanies';
 import {
   companyFormDefaults,
   companyFormSchema,
@@ -23,6 +24,8 @@ interface CompanyDrawerProps {
   onClose: () => void;
   /** When provided, the drawer edits this company instead of creating one. */
   company?: Company;
+  /** Called after the company is deleted (e.g. to navigate away from its page). */
+  onDeleted?: () => void;
 }
 
 /**
@@ -30,10 +33,22 @@ interface CompanyDrawerProps {
  * (`mode: 'onChange'`); the submit button stays disabled until the form is
  * valid. Success/error toasts are fired by the underlying mutation hooks.
  */
-export function CompanyDrawer({ open, onClose, company }: CompanyDrawerProps) {
+export function CompanyDrawer({ open, onClose, company, onDeleted }: CompanyDrawerProps) {
   const isEdit = Boolean(company);
   const createCompany = useCreateCompany();
   const updateCompany = useUpdateCompany();
+  const deleteCompany = useDeleteCompany();
+
+  const handleDelete = async () => {
+    if (!company) return;
+    try {
+      await deleteCompany.mutateAsync(company.id);
+      onClose();
+      onDeleted?.();
+    } catch {
+      // Error toast handled by the mutation hook; keep the drawer open.
+    }
+  };
 
   const {
     register,
@@ -80,13 +95,20 @@ export function CompanyDrawer({ open, onClose, company }: CompanyDrawerProps) {
       title={isEdit ? 'Edit company' : 'Add company'}
       description={isEdit ? 'Update this client’s details.' : 'Create a new client record.'}
       footer={
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form={FORM_ID} loading={isSubmitting} disabled={!isValid}>
-            {isEdit ? 'Save changes' : 'Add company'}
-          </Button>
+        <div className="flex items-center justify-between gap-2">
+          {isEdit ? (
+            <ConfirmDeleteButton onConfirm={handleDelete} loading={deleteCompany.isPending} />
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" form={FORM_ID} loading={isSubmitting} disabled={!isValid}>
+              {isEdit ? 'Save changes' : 'Add company'}
+            </Button>
+          </div>
         </div>
       }
     >

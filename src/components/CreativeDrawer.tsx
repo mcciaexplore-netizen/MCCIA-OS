@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteButton } from '@/components/ui/ConfirmDeleteButton';
 import { FormField, SelectInput, TextArea, TextInput } from '@/components/form/fields';
 import { Combobox, type ComboboxOption } from '@/components/form/Combobox';
 import { PlatformPicker } from '@/components/social/PlatformPicker';
@@ -13,6 +14,7 @@ import { sheets } from '@/api/sheets';
 import { queryKeys } from '@/api/queryKeys';
 import { CREATIVE_STATUS_OPTIONS, INDUSTRY_LABELS, SHEET_NAMES } from '@/constants';
 import { useCompanies } from '@/hooks/useCompanies';
+import { useDeleteSocialCreative } from '@/hooks/useSocialCreatives';
 import {
   CAPTION_MAX,
   creativeFormDefaults,
@@ -44,6 +46,17 @@ export function CreativeDrawer({ open, onClose, creative, defaultCompanyId }: Cr
   const isEdit = Boolean(creative);
   const qc = useQueryClient();
   const companies = useCompanies();
+  const deleteCreative = useDeleteSocialCreative();
+
+  const handleDelete = async () => {
+    if (!creative) return;
+    try {
+      await deleteCreative.mutateAsync(creative.id);
+      onClose();
+    } catch {
+      // Mutation hook surfaces the error toast.
+    }
+  };
 
   const {
     control,
@@ -121,13 +134,20 @@ export function CreativeDrawer({ open, onClose, creative, defaultCompanyId }: Cr
         isEdit ? 'Update this creative.' : 'Create a creative for one or more platforms.'
       }
       footer={
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form={FORM_ID} loading={saveMutation.isPending} disabled={!isValid}>
-            {isEdit ? 'Save changes' : 'Add creative'}
-          </Button>
+        <div className="flex items-center justify-between gap-2">
+          {isEdit ? (
+            <ConfirmDeleteButton onConfirm={handleDelete} loading={deleteCreative.isPending} />
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" form={FORM_ID} loading={saveMutation.isPending} disabled={!isValid}>
+              {isEdit ? 'Save changes' : 'Add creative'}
+            </Button>
+          </div>
         </div>
       }
     >

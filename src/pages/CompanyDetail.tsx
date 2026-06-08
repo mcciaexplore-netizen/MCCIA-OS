@@ -164,7 +164,12 @@ export function CompanyDetail() {
         </aside>
       </div>
 
-      <CompanyDrawer open={editOpen} onClose={() => setEditOpen(false)} company={company} />
+      <CompanyDrawer
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        company={company}
+        onDeleted={() => navigate(ROUTES.companies)}
+      />
     </div>
   );
 }

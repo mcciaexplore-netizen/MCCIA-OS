@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  AlertTriangle,
   Database,
   Download,
   FileSpreadsheet,
@@ -268,6 +269,30 @@ function PreferencesCard() {
 function DataCard() {
   const qc = useQueryClient();
   const [exporting, setExporting] = useState(false);
+  const [erasing, setErasing] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const canErase = confirmText.trim().toUpperCase() === 'ERASE';
+
+  const eraseAll = async () => {
+    if (!canErase || erasing) return;
+    setErasing(true);
+    try {
+      await sheets.overwriteMany([
+        { sheet: SHEET_NAMES.companies, rows: [] },
+        { sheet: SHEET_NAMES.consultingSessions, rows: [] },
+        { sheet: SHEET_NAMES.appProjects, rows: [] },
+        { sheet: SHEET_NAMES.socialCreatives, rows: [] },
+        { sheet: SHEET_NAMES.followUps, rows: [] },
+      ]);
+      qc.clear();
+      setConfirmText('');
+      toast.success('All data erased.');
+    } catch (error) {
+      toast.error(errorMessage(error, 'Could not erase data'));
+    } finally {
+      setErasing(false);
+    }
+  };
 
   const exportAll = async () => {
     setExporting(true);
@@ -317,7 +342,7 @@ function DataCard() {
     <SectionCard
       icon={Database}
       title="Data management"
-      description="Your data is saved in this browser. Export a backup any time."
+      description="Your data is saved securely in the cloud. Export a backup any time."
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -345,6 +370,40 @@ function DataCard() {
           <Trash2 className="h-4 w-4" />
           Refresh views
         </Button>
+      </div>
+
+      <hr className="my-4 border-slate-100 dark:border-slate-800" />
+
+      {/* Danger zone: irreversible full wipe. */}
+      <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-4 dark:border-rose-900/50 dark:bg-rose-950/20">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-rose-700 dark:text-rose-300">Erase all data</p>
+            <p className="mt-0.5 text-sm text-rose-600/80 dark:text-rose-300/80">
+              Permanently delete every company, session, project, creative, and follow-up in your
+              workspace. This cannot be undone — export a backup first.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <TextInput
+                aria-label="Type ERASE to confirm"
+                placeholder="Type ERASE to confirm"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                className="sm:max-w-[16rem]"
+              />
+              <button
+                type="button"
+                disabled={!canErase || erasing}
+                onClick={eraseAll}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+                {erasing ? 'Erasing…' : 'Erase everything'}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </SectionCard>
   );

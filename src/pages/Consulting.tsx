@@ -21,11 +21,13 @@ import { CardSkeleton } from '@/components/ui/Skeleton';
 import { FormField, SelectInput, TextArea, TextInput } from '@/components/form/fields';
 import { FollowUpBadge } from '@/components/consulting/FollowUpBadge';
 import { IndustryBadge } from '@/components/companies/IndustryBadge';
+import { ConfirmDeleteButton } from '@/components/ui/ConfirmDeleteButton';
 import { LogSessionDrawer } from '@/components/LogSessionDrawer';
 import { useRegisterNewAction } from '@/components/command/useAppCommand';
 import { useCompanies } from '@/hooks/useCompanies';
 import {
   useConsultingSessions,
+  useDeleteConsultingSession,
   useUpdateConsultingSession,
 } from '@/hooks/useConsultingSessions';
 import { useCreateFollowUp, useFollowUps, useUpdateFollowUp } from '@/hooks/useFollowUps';
@@ -322,6 +324,7 @@ function SessionRow({
 
   const updateFollowUp = useUpdateFollowUp();
   const updateSession = useUpdateConsultingSession();
+  const deleteSession = useDeleteConsultingSession();
   const createFollowUp = useCreateFollowUp();
 
   const [notesDraft, setNotesDraft] = useState(session.notes ?? '');
@@ -469,7 +472,7 @@ function SessionRow({
               ) : (
                 <p className="text-sm text-slate-400">No notes recorded.</p>
               )}
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Button variant="secondary" size="sm" onClick={startEditing}>
                   <Pencil className="h-4 w-4" />
                   Edit
@@ -480,6 +483,12 @@ function SessionRow({
                     Schedule next follow-up
                   </Button>
                 )}
+                <ConfirmDeleteButton
+                  className="ml-auto"
+                  onConfirm={() => deleteSession.mutate(session.id)}
+                  loading={deleteSession.isPending}
+                  label="Delete session"
+                />
               </div>
             </div>
           )}

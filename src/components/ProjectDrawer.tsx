@@ -3,11 +3,12 @@ import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { SlideOver } from '@/components/ui/SlideOver';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDeleteButton } from '@/components/ui/ConfirmDeleteButton';
 import { FormField, SelectInput, TextArea, TextInput } from '@/components/form/fields';
 import { Combobox, type ComboboxOption } from '@/components/form/Combobox';
 import { INDUSTRY_LABELS, PROJECT_STAGE_OPTIONS } from '@/constants';
 import { useCompanies } from '@/hooks/useCompanies';
-import { useCreateAppProject, useUpdateAppProject } from '@/hooks/useAppProjects';
+import { useCreateAppProject, useDeleteAppProject, useUpdateAppProject } from '@/hooks/useAppProjects';
 import {
   projectFormDefaults,
   projectFormSchema,
@@ -35,6 +36,17 @@ export function ProjectDrawer({ open, onClose, project, defaultStage }: ProjectD
   const companies = useCompanies();
   const createProject = useCreateAppProject();
   const updateProject = useUpdateAppProject();
+  const deleteProject = useDeleteAppProject();
+
+  const handleDelete = async () => {
+    if (!project) return;
+    try {
+      await deleteProject.mutateAsync(project.id);
+      onClose();
+    } catch {
+      // Mutation hooks surface the error toast.
+    }
+  };
 
   const {
     control,
@@ -85,13 +97,20 @@ export function ProjectDrawer({ open, onClose, project, defaultStage }: ProjectD
       title={isEdit ? 'Edit project' : 'Add project'}
       description={isEdit ? 'Update this project’s details.' : 'Add a new app project to the pipeline.'}
       footer={
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form={FORM_ID} loading={isSubmitting} disabled={!isValid}>
-            {isEdit ? 'Save changes' : 'Add project'}
-          </Button>
+        <div className="flex items-center justify-between gap-2">
+          {isEdit ? (
+            <ConfirmDeleteButton onConfirm={handleDelete} loading={deleteProject.isPending} />
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" form={FORM_ID} loading={isSubmitting} disabled={!isValid}>
+              {isEdit ? 'Save changes' : 'Add project'}
+            </Button>
+          </div>
         </div>
       }
     >
