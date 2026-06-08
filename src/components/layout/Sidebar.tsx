@@ -7,7 +7,7 @@ import { cn } from '@/utils/cn';
 /** Persistent left navigation, shown on desktop (lg+) viewports only. */
 export function Sidebar() {
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:flex">
+    <aside className="hidden w-64 shrink-0 flex-col self-start border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:sticky lg:top-0 lg:flex lg:h-dvh">
       <div className="flex h-16 items-center gap-2 border-b border-slate-200 px-5 dark:border-slate-800">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-white">
           <Sparkles className="h-5 w-5" aria-hidden />

@@ -1,5 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
-import { Building2, Download, Plus, Search, Upload } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Building2, ChevronLeft, ChevronRight, Download, Plus, Search, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -30,11 +30,16 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'completed', label: COMPANY_STATUS_LABELS.completed },
 ];
 
+// Render a bounded page of cards so the list stays fast with tens of thousands
+// of companies (filtering/search still runs across the whole set).
+const PAGE_SIZE = 48;
+
 export function Companies() {
   const { data, isPending, isError, error, refetch } = useCompaniesWithStats();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [page, setPage] = useState(1);
 
   // Import / export.
   const [importOpen, setImportOpen] = useState(false);
@@ -70,13 +75,31 @@ export function Companies() {
     const query = search.trim().toLowerCase();
     return (data ?? []).filter((company) => {
       const matchesStatus = statusFilter === 'all' || company.status === statusFilter;
-      const matchesSearch =
-        query === '' ||
+      if (!matchesStatus) return false;
+      if (query === '') return true;
+      return (
         company.name.toLowerCase().includes(query) ||
-        (company.contactName ?? '').toLowerCase().includes(query);
-      return matchesStatus && matchesSearch;
+        (company.contactName ?? '').toLowerCase().includes(query) ||
+        (company.contactEmail ?? '').toLowerCase().includes(query) ||
+        (company.contactPhone ?? '').toLowerCase().includes(query) ||
+        (company.udyamNumber ?? '').toLowerCase().includes(query)
+      );
     });
   }, [data, search, statusFilter]);
+
+  // Jump back to the first page whenever the result set changes underneath us.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [filtered, currentPage]
+  );
+  const rangeStart = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, filtered.length);
 
   return (
     <div className="space-y-6">
@@ -170,11 +193,45 @@ export function Companies() {
           description="No companies match your search or filters. Try adjusting them."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {filtered.map((company) => (
-            <CompanyCard key={company.id} company={company} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {pageItems.map((company) => (
+              <CompanyCard key={company.id} company={company} />
+            ))}
+          </div>
+
+          {filtered.length > PAGE_SIZE && (
+            <div className="mt-6 flex flex-col items-center justify-between gap-3 sm:flex-row">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span className="font-medium text-slate-700 dark:text-slate-200">{rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()}</span>{' '}
+                of <span className="font-medium text-slate-700 dark:text-slate-200">{filtered.length.toLocaleString()}</span>
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Prev
+                </Button>
+                <span className="px-1 text-sm tabular-nums text-slate-600 dark:text-slate-300">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <CompanyDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />

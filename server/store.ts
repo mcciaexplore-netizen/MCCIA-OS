@@ -45,17 +45,29 @@ function nowIso(): string {
  * partitioned per user id.
  * ------------------------------------------------------------------ */
 
+/** PostgREST caps a single response (default 1000 rows), so page through them. */
+const PAGE_SIZE = 1000;
+
 /** All of one owner's rows for a sheet, oldest first (matches append order). */
 export async function readSheet<T = Row>(sheet: Sheet, ownerId: string): Promise<T[]> {
-  const { data, error } = await supabase()
-    .from('records')
-    .select('data')
-    .eq('sheet', sheet)
-    .eq('owner_id', ownerId)
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => r.data as T);
+  const out: T[] = [];
+  // Fetch in stable-ordered pages until a short page signals the end. Scales to
+  // tens of thousands of rows without tripping the data API's per-request cap.
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase()
+      .from('records')
+      .select('data')
+      .eq('sheet', sheet)
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const batch = data ?? [];
+    for (const r of batch) out.push(r.data as T);
+    if (batch.length < PAGE_SIZE) break;
+  }
+  return out;
 }
 
 /** Append a new row owned by `ownerId`; the server owns id + timestamps. */
